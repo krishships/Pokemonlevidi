@@ -284,7 +284,7 @@ canvas{display:block;image-rendering:auto;border-radius:2px;
         x: 300, y: FLOOR, vy: 0, vx: 0, facing: 1, onGround: true,
         masks: P.masks, soul: 0, iframes: 0, hurt: 0,
         dashT: 0, dashCd: 0, swingT: 0, swingCd: 0, focusT: 0,
-        poise: P.playerPoise, poiseBreak: 0, anim: 0, dead: false
+        poise: P.playerPoise, poiseBreak: 0, anim: 0, dead: false, hitDone: false
       };
 
       this.companion = {
@@ -481,8 +481,9 @@ canvas{display:block;image-rendering:auto;border-radius:2px;
 
       if (p.swingT > 0) {
         p.swingT--;
-        if (p.swingT <= 7 && p.swingT >= 4) {
+        if (p.swingT <= 7 && p.swingT >= 4 && !p.hitDone) {
           if (overlap(p.x, p.y, p.facing, P.nailReach, P.nailHeight, b.x, b.y)) {
+            p.hitDone = true;
             this.hurtBoss(P.nailDmg, P.nailPoise);
             p.soul = Math.min(P.soulMax, p.soul + P.soulPerHit);
           }
@@ -490,6 +491,7 @@ canvas{display:block;image-rendering:auto;border-radius:2px;
       } else if (input.attack && p.swingCd === 0) {
         p.swingT = P.swingFrames;
         p.swingCd = P.swingCd;
+        p.hitDone = false;
         this.emit('slash', { x: p.x, y: p.y, facing: p.facing });
       }
 
