@@ -61,9 +61,9 @@ trainer's moves. Real two-player-vs-AI, in the real game, no engine rewrite.
 ## Status
 
 - Patch applies cleanly: **verified** (`git apply --check`).
-- Compiles: **not verified.** No Android NDK or ARM toolchain here. The C++
-  uses a structured binding (`auto [data, size]`), so the module needs
-  `-std=c++17`; if the build is older, rewrite it as two calls.
+- C++ standard: **verified.** `libretrodroid/src/main/cpp/CMakeLists.txt:4`
+  sets `-std=c++17`, so the structured binding (`auto [data, size]`) is legal.
+- Compiles: **not verified.** No Android NDK or ARM toolchain in this sandbox.
 - Runs on device: **not verified.**
 
 ## The web route, for comparison
