@@ -128,6 +128,20 @@ jobs:
           export PATH="$HOME/rgbds:$PATH"
           make -C base/pokered -j"$(nproc)"
 
+      - name: Build headless boot test
+        run: |
+          git clone --depth 1 https://github.com/binji/binjgb.git base/binjgb
+          cc -O2 -std=gnu99 -Ibase/binjgb/src \
+             tools/boottest.c \
+             base/binjgb/src/memory.c base/binjgb/src/common.c \
+             base/binjgb/src/options.c base/binjgb/src/emulator.c \
+             base/binjgb/src/joypad.c -lm -o boottest
+
+      - name: Boot test (headless, no display)
+        run: |
+          ls -l base/pokered/*.gb* || true
+          ./boottest base/pokered/pokered.gbc 600
+
       - name: Upload ROMs
         uses: actions/upload-artifact@v4
         with:
