@@ -1,0 +1,102 @@
+diff --git a/libretrodroid/src/main/cpp/libretrodroid.cpp b/libretrodroid/src/main/cpp/libretrodroid.cpp
+index 60640c4..d1912da 100644
+--- a/libretrodroid/src/main/cpp/libretrodroid.cpp
++++ b/libretrodroid/src/main/cpp/libretrodroid.cpp
+@@ -551,12 +551,33 @@ int16_t LibretroDroid::handleSetInputState(
+     unsigned int index,
+     unsigned int id
+ ) {
++    if (inputOverrideEnabled && port == 0 && index == 0) {
++        return (inputOverrideMask >> id) & 1 ? 1 : 0;
++    }
+     if (input) {
+         return input->getInputState(port, device, index, id);
+     }
+     return 0;
+ }
+ 
++void LibretroDroid::setInputOverride(bool enabled, int32_t mask) {
++    inputOverrideEnabled = enabled;
++    inputOverrideMask = mask;
++}
++
++std::pair<int8_t*, size_t> LibretroDroid::getSystemRam() {
++    std::lock_guard<std::mutex> lock(coreLock);
++    if (!core || !core->retro_get_memory_data || !core->retro_get_memory_size) {
++        return {nullptr, 0};
++    }
++    auto size = core->retro_get_memory_size(RETRO_MEMORY_SYSTEM_RAM);
++    auto data = static_cast<int8_t*>(core->retro_get_memory_data(RETRO_MEMORY_SYSTEM_RAM));
++    if (!data || size == 0) {
++        return {nullptr, 0};
++    }
++    return {data, size};
++}
++
+ uintptr_t LibretroDroid::handleGetCurrentFrameBuffer() {
+     if (video) {
+         return video->getCurrentFramebuffer();
+diff --git a/libretrodroid/src/main/cpp/libretrodroid.h b/libretrodroid/src/main/cpp/libretrodroid.h
+index b507aee..992cc71 100644
+--- a/libretrodroid/src/main/cpp/libretrodroid.h
++++ b/libretrodroid/src/main/cpp/libretrodroid.h
+@@ -140,6 +140,15 @@ public:
+     void handleVideoRefresh(const void *data, unsigned width, unsigned height, size_t pitch);
+     size_t handleAudioCallback(const int16_t* data, size_t frames);
+     int16_t handleSetInputState(unsigned port, unsigned device, unsigned index, unsigned id);
++
++    // --- AI player hooks -------------------------------------------------
++    // Force the input state returned to the core, bypassing touch/gamepad.
++    // Bit N corresponds to libretro id N (RETRO_DEVICE_ID_JOYPAD_A == 8 etc).
++    void setInputOverride(bool enabled, int32_t mask);
++
++    // Direct view of RETRO_MEMORY_SYSTEM_RAM: {pointer, size}. Null when the
++    // core does not expose system RAM.
++    std::pair<int8_t*, size_t> getSystemRam();
+     uintptr_t handleGetCurrentFrameBuffer();
+ 
+ private:
+@@ -183,6 +192,8 @@ private:
+     std::unique_ptr<Video> video;
+     std::unique_ptr<FPSSync> fpsSync;
+     std::unique_ptr<Input> input;
++    bool inputOverrideEnabled = false;
++    int32_t inputOverrideMask = 0;
+     std::unique_ptr<Rumble> rumble;
+ };
+ 
+diff --git a/libretrodroid/src/main/cpp/libretrodroidjni.cpp b/libretrodroid/src/main/cpp/libretrodroidjni.cpp
+index 2ec15cf..ed14404 100644
+--- a/libretrodroid/src/main/cpp/libretrodroidjni.cpp
++++ b/libretrodroid/src/main/cpp/libretrodroidjni.cpp
+@@ -54,6 +54,30 @@ extern "C" {
+ 
+ extern "C" {
+ 
++// --- AI player hooks -----------------------------------------------------
++
++JNIEXPORT void JNICALL Java_com_swordfish_libretrodroid_LibretroDroid_setInputOverride(
++    JNIEnv* env,
++    jclass obj,
++    jboolean enabled,
++    jint mask
++) {
++    LibretroDroid::getInstance().setInputOverride(enabled, mask);
++}
++
++// Returns a direct ByteBuffer aliasing system RAM, or null. The buffer is
++// only valid while the core is running; do not free it.
++JNIEXPORT jobject JNICALL Java_com_swordfish_libretrodroid_LibretroDroid_getSystemRam(
++    JNIEnv* env,
++    jclass obj
++) {
++    auto [data, size] = LibretroDroid::getInstance().getSystemRam();
++    if (data == nullptr || size == 0) {
++        return nullptr;
++    }
++    return env->NewDirectByteBuffer(data, static_cast<jlong>(size));
++}
++
+ JNIEXPORT jint JNICALL Java_com_swordfish_libretrodroid_LibretroDroid_availableDisks(
+     JNIEnv* env,
+     jclass obj
