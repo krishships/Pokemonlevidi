@@ -28,7 +28,7 @@ needed — `pokeemerald` compiles its own image. CI produces `emerald-gba`.
 **The AI** is `site/index.html`. Load the ROM into it, and:
 
 - he sees the screen — a frame is captured through the core's own screenshot
-  command and sent to the model with every whisper
+  command every three seconds while awake, and with every whisper
 - he moves — the model answers with an action and a number of steps, which
   become button presses
 - he remembers — the last few exchanges go back with each request

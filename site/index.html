@@ -213,6 +213,7 @@ $('clear').addEventListener('click', () => {
 let emu = null;
 let awake = false;
 let idleTimer = null;
+let lookTimer = null;
 let inputsSent = 0;
 let framesSeen = 0;
 let mem = { ok: false, size: 0 };
@@ -472,13 +473,17 @@ $('startAI').addEventListener('click', () => {
   awake = true;
   clearInterval(idleTimer);
   idleTimer = setInterval(idle, 2400);
-  log('sys', 'he is awake');
+  // keep his eyes fresh: a frame every few seconds, not only when you speak
+  clearInterval(lookTimer);
+  lookTimer = setInterval(() => { if (awake) look(); }, 3000);
+  log('sys', 'he is awake — eyes on');
   paintStatus();
 });
 
 $('stopAI').addEventListener('click', () => {
   awake = false;
   clearInterval(idleTimer);
+  clearInterval(lookTimer);
   log('sys', 'he rests');
 });
 
@@ -509,7 +514,11 @@ async function speak() {
 
   log('him', reply.say || '…');
   history.push({ role: 'assistant', content: reply.say || '' });
-  if (!awake && emu) { awake = true; clearInterval(idleTimer); idleTimer = setInterval(idle, 2400); }
+  if (!awake && emu) {
+    awake = true;
+    clearInterval(idleTimer); idleTimer = setInterval(idle, 2400);
+    clearInterval(lookTimer); lookTimer = setInterval(() => { if (awake) look(); }, 3000);
+  }
   perform(reply.act, reply.steps);
   paintStatus();
 }
