@@ -1,0 +1,119 @@
+{
+  "id": "pale_court_duelist",
+  "name": "Pale Court Duelist",
+  "epithet": "The Last Etiquette",
+  "archetype": "teleporting duelist: repositions between strikes, punishes standing still",
+  "inspiration": "Hollow Knight \u2014 Dung Defender / Sly (behaviour only)",
+  "hp": 700,
+  "poise": 100,
+  "phases": {
+    "phase2_hp_pct": 65,
+    "phase3_hp_pct": 30
+  },
+  "movement": {
+    "walk_speed": 2,
+    "aggression": 72
+  },
+  "attacks": [
+    {
+      "id": "court_bow",
+      "name": "Court Bow",
+      "kind": "melee",
+      "telegraph": 16,
+      "active": 5,
+      "recovery": 20,
+      "damage": 18,
+      "poise_damage": 14,
+      "range_min": 0,
+      "range_max": 50,
+      "height": 24,
+      "lunge": 0,
+      "weight": 40,
+      "min_phase": 1
+    },
+    {
+      "id": "sidestep_cut",
+      "name": "Sidestep Cut",
+      "kind": "lunge",
+      "telegraph": 12,
+      "active": 5,
+      "recovery": 16,
+      "damage": 16,
+      "poise_damage": 12,
+      "range_min": 36,
+      "range_max": 92,
+      "height": 22,
+      "lunge": 6,
+      "weight": 30,
+      "min_phase": 1
+    },
+    {
+      "id": "etiquette",
+      "name": "Etiquette",
+      "kind": "melee",
+      "telegraph": 9,
+      "active": 6,
+      "recovery": 18,
+      "damage": 22,
+      "poise_damage": 18,
+      "range_min": 0,
+      "range_max": 58,
+      "height": 26,
+      "lunge": 3,
+      "weight": 25,
+      "min_phase": 2
+    },
+    {
+      "id": "needle_volley",
+      "name": "Needle Volley",
+      "kind": "projectile",
+      "telegraph": 18,
+      "active": 8,
+      "recovery": 24,
+      "damage": 14,
+      "poise_damage": 8,
+      "range_min": 80,
+      "range_max": 160,
+      "height": 28,
+      "lunge": 0,
+      "weight": 20,
+      "min_phase": 2
+    },
+    {
+      "id": "final_bow",
+      "name": "Final Bow",
+      "kind": "area",
+      "telegraph": 24,
+      "active": 12,
+      "recovery": 30,
+      "damage": 32,
+      "poise_damage": 28,
+      "range_min": 0,
+      "range_max": 78,
+      "height": 40,
+      "lunge": 0,
+      "weight": 15,
+      "min_phase": 3
+    },
+    {
+      "id": "pale_flourish",
+      "name": "Pale Flourish",
+      "kind": "melee",
+      "telegraph": 8,
+      "active": 10,
+      "recovery": 16,
+      "damage": 18,
+      "poise_damage": 14,
+      "range_min": 0,
+      "range_max": 66,
+      "height": 30,
+      "lunge": 4,
+      "weight": 15,
+      "min_phase": 3
+    }
+  ],
+  "provenance": {
+    "origin": "authored",
+    "notes": "Prototype for the teleport hook: ab_body.x is snapped during the telegraph."
+  }
+}

@@ -1,0 +1,43 @@
+name: Bug
+description: Something in the battle core, data pipeline or build is wrong
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Battle core (src/action_battle.c)
+        - Boss data (data/bosses)
+        - Codegen / validation tools
+        - ROM build / graft
+        - Docs
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happens
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What should happen
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: Which boss, which attack, which frame? Paste the failing test output if there is one.
+    validations:
+      required: true
+  - type: checkboxes
+    id: no-rom
+    attributes:
+      label: Confirm
+      options:
+        - label: This report contains no ROM, save or ripped asset
+          required: true

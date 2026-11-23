@@ -1,0 +1,119 @@
+{
+  "id": "blade_dancer_of_the_grove",
+  "name": "Blade Dancer of the Grove",
+  "epithet": "Three Notes, One Cut",
+  "archetype": "fast combo duelist: short telegraphs, chained strikes, rewards dashing through",
+  "inspiration": "Hollow Knight \u2014 Mantis Lords (behaviour only)",
+  "hp": 640,
+  "poise": 90,
+  "phases": {
+    "phase2_hp_pct": 70,
+    "phase3_hp_pct": 35
+  },
+  "movement": {
+    "walk_speed": 3,
+    "aggression": 64
+  },
+  "attacks": [
+    {
+      "id": "first_note",
+      "name": "First Note",
+      "kind": "melee",
+      "telegraph": 10,
+      "active": 4,
+      "recovery": 14,
+      "damage": 14,
+      "poise_damage": 10,
+      "range_min": 0,
+      "range_max": 48,
+      "height": 22,
+      "lunge": 0,
+      "weight": 40,
+      "min_phase": 1
+    },
+    {
+      "id": "second_note",
+      "name": "Second Note",
+      "kind": "melee",
+      "telegraph": 8,
+      "active": 4,
+      "recovery": 12,
+      "damage": 14,
+      "poise_damage": 10,
+      "range_min": 0,
+      "range_max": 52,
+      "height": 22,
+      "lunge": 0,
+      "weight": 30,
+      "min_phase": 1
+    },
+    {
+      "id": "grove_dash",
+      "name": "Grove Dash",
+      "kind": "lunge",
+      "telegraph": 12,
+      "active": 6,
+      "recovery": 18,
+      "damage": 18,
+      "poise_damage": 12,
+      "range_min": 44,
+      "range_max": 104,
+      "height": 20,
+      "lunge": 7,
+      "weight": 30,
+      "min_phase": 2
+    },
+    {
+      "id": "crescent",
+      "name": "Crescent",
+      "kind": "projectile",
+      "telegraph": 14,
+      "active": 6,
+      "recovery": 18,
+      "damage": 16,
+      "poise_damage": 8,
+      "range_min": 70,
+      "range_max": 150,
+      "height": 26,
+      "lunge": 0,
+      "weight": 20,
+      "min_phase": 2
+    },
+    {
+      "id": "third_note",
+      "name": "Third Note",
+      "kind": "melee",
+      "telegraph": 7,
+      "active": 6,
+      "recovery": 16,
+      "damage": 20,
+      "poise_damage": 16,
+      "range_min": 0,
+      "range_max": 60,
+      "height": 26,
+      "lunge": 3,
+      "weight": 20,
+      "min_phase": 3
+    },
+    {
+      "id": "final_cadence",
+      "name": "Final Cadence",
+      "kind": "melee",
+      "telegraph": 9,
+      "active": 12,
+      "recovery": 20,
+      "damage": 12,
+      "poise_damage": 8,
+      "range_min": 0,
+      "range_max": 70,
+      "height": 30,
+      "lunge": 4,
+      "weight": 20,
+      "min_phase": 3
+    }
+  ],
+  "provenance": {
+    "origin": "authored",
+    "notes": "Shortest telegraphs in the roster; the dash iframe window is the intended answer."
+  }
+}

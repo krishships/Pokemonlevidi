@@ -1,0 +1,58 @@
+{
+  "$comment": "Sources consulted for boss mechanics. Reference-only unless licence is permissive. Enforced by tools/import_bosses.py.",
+  "allowed_import_licences": [
+    "MIT",
+    "Apache-2.0",
+    "BSD-3-Clause",
+    "CC0-1.0",
+    "Unlicense",
+    "public-domain"
+  ],
+  "sources": [
+    {
+      "name": "HK3DS",
+      "url": "https://github.com/silviognotti/HK3DS",
+      "licence": "MIT",
+      "licence_scope": "code only; game assets are Team Cherry's and excluded",
+      "status": "reference-only",
+      "used_for": "how a 2D action boss telegraphs, phases and recovers; build/port structure",
+      "note": "No code or asset imported. Its MIT licence covers its own port code, not Hollow Knight's content."
+    },
+    {
+      "name": "hollow_nes",
+      "url": "https://github.com/vitimbro/hollow_nes",
+      "licence": "none stated",
+      "licence_scope": "unknown",
+      "status": "reference-only",
+      "used_for": "NES-scale hitbox and frame-count budgeting",
+      "note": "No licence file, so nothing may be imported. Read for ideas only."
+    },
+    {
+      "name": "hallowdale",
+      "url": "https://github.com/mega-dean/hallowdale",
+      "licence": "MIT (code) / CC BY-NC 4.0 (assets)",
+      "licence_scope": "split",
+      "status": "reference-only",
+      "used_for": "movement feel and arena pacing",
+      "note": "Assets are non-commercial and partly third-party; do not copy art."
+    },
+    {
+      "name": "Hollow-Knight-Imitation",
+      "url": "https://github.com/DanielDFY/Hollow-Knight-Imitation",
+      "licence": "none stated",
+      "licence_scope": "unknown",
+      "status": "reference-only",
+      "used_for": "player controller feel (dash length, jump arc)",
+      "note": "Unity/C#, not reusable here regardless of licence."
+    },
+    {
+      "name": "HK3DS (ColdBrewOfficial mirror)",
+      "url": "https://github.com/ColdBrewOfficial/HK3DS",
+      "licence": "none stated",
+      "licence_scope": "unknown",
+      "status": "reference-only",
+      "used_for": "demake scope expectations",
+      "note": "Source was not released in the original repo; nothing to import."
+    }
+  ]
+}

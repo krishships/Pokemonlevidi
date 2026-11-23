@@ -1,0 +1,38 @@
+# ---------------------------------------------------------------
+# Never commit ROMs, saves, or ripped game assets. See docs/LEGAL.md
+# ---------------------------------------------------------------
+*.gba
+*.gbc
+*.gb
+*.nds
+*.sav
+*.sa1
+*.state
+*.ss1
+baserom*
+pokeemerald.gba
+*.bps
+*.ups
+*.ips
+*.xdelta
+
+# Ripped / extracted art, audio, fonts
+assets/ripped/
+assets/extracted/
+**/graphics/ripped/
+
+# Build output
+build/
+dist/
+base/
+*.o
+*.elf
+*.map
+*.sym
+
+# Tooling
+__pycache__/
+*.pyc
+.venv/
+venv/
+.DS_Store

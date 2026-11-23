@@ -1,0 +1,119 @@
+{
+  "id": "brass_bell_beast",
+  "name": "Brass Bell Beast",
+  "epithet": "What the Bell Woke",
+  "archetype": "armoured charger: breaks its own poise on wall hits, opens a long punish window",
+  "inspiration": "Hollow Knight \u2014 Gruz Mother / Watcher Knights (behaviour only)",
+  "hp": 1100,
+  "poise": 220,
+  "phases": {
+    "phase2_hp_pct": 55,
+    "phase3_hp_pct": 22
+  },
+  "movement": {
+    "walk_speed": 1,
+    "aggression": 120
+  },
+  "attacks": [
+    {
+      "id": "bell_toll",
+      "name": "Bell Toll",
+      "kind": "area",
+      "telegraph": 32,
+      "active": 10,
+      "recovery": 34,
+      "damage": 26,
+      "poise_damage": 30,
+      "range_min": 0,
+      "range_max": 60,
+      "height": 20,
+      "lunge": 0,
+      "weight": 40,
+      "min_phase": 1
+    },
+    {
+      "id": "brass_charge",
+      "name": "Brass Charge",
+      "kind": "lunge",
+      "telegraph": 26,
+      "active": 18,
+      "recovery": 40,
+      "damage": 32,
+      "poise_damage": 36,
+      "range_min": 56,
+      "range_max": 150,
+      "height": 22,
+      "lunge": 7,
+      "weight": 35,
+      "min_phase": 1
+    },
+    {
+      "id": "clapper",
+      "name": "Clapper",
+      "kind": "melee",
+      "telegraph": 18,
+      "active": 8,
+      "recovery": 24,
+      "damage": 24,
+      "poise_damage": 20,
+      "range_min": 0,
+      "range_max": 64,
+      "height": 30,
+      "lunge": 0,
+      "weight": 25,
+      "min_phase": 2
+    },
+    {
+      "id": "resonance",
+      "name": "Resonance",
+      "kind": "area",
+      "telegraph": 24,
+      "active": 16,
+      "recovery": 30,
+      "damage": 22,
+      "poise_damage": 18,
+      "range_min": 0,
+      "range_max": 104,
+      "height": 36,
+      "lunge": 0,
+      "weight": 20,
+      "min_phase": 2
+    },
+    {
+      "id": "cracked_bell",
+      "name": "Cracked Bell",
+      "kind": "lunge",
+      "telegraph": 16,
+      "active": 14,
+      "recovery": 26,
+      "damage": 28,
+      "poise_damage": 26,
+      "range_min": 40,
+      "range_max": 130,
+      "height": 24,
+      "lunge": 6,
+      "weight": 20,
+      "min_phase": 3
+    },
+    {
+      "id": "last_toll",
+      "name": "Last Toll",
+      "kind": "area",
+      "telegraph": 20,
+      "active": 20,
+      "recovery": 40,
+      "damage": 40,
+      "poise_damage": 44,
+      "range_min": 0,
+      "range_max": 86,
+      "height": 44,
+      "lunge": 0,
+      "weight": 15,
+      "min_phase": 3
+    }
+  ],
+  "provenance": {
+    "origin": "authored",
+    "notes": "Highest poise in the roster: intended to need three staggers per kill."
+  }
+}

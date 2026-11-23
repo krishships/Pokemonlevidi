@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  data-and-core:
+    name: data + battle core
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate boss data
+        run: python3 tools/validate_bosses.py
+
+      - name: Generated tables are current
+        run: python3 tools/gen_bosses.py --check
+
+      - name: Reject committed ROMs and binaries
+        run: |
+          set -e
+          bad=$(git ls-files | grep -Ei '\.(gba|gbc|gb|nds|sav|state|bps|ups|ips|xdelta)$' || true)
+          if [ -n "$bad" ]; then
+            echo "::error::ROM/save/patch files must never be committed:"
+            echo "$bad"
+            exit 1
+          fi
+          big=$(git ls-files -z | xargs -0 -r du -k | awk '$1 > 2048 {print $2}' || true)
+          if [ -n "$big" ]; then
+            echo "::error::files over 2 MB (add an explicit allowlist entry if intentional):"
+            echo "$big"
+            exit 1
+          fi
+
+      - name: Build host tests
+        run: make test
+
+      - name: Upload test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: host-test-log
+          path: build/
+          if-no-files-found: ignore
+
+  rom-build:
+    # Optional: only runs when the repo variable AB_ENABLE_ROM_BUILD is 'true'
+    # and the secret AB_ROM_BASE64 holds a base ROM you dumped yourself.
+    name: GBA ROM (optional)
+    if: vars.AB_ENABLE_ROM_BUILD == 'true'
+    runs-on: ubuntu-latest
+    container: devkitpro/devkitarm:latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch pinned pokeemerald base
+        run: bash tools/fetch_base.sh
+
+      - name: Graft hack sources onto the engine
+        run: bash tools/graft.sh
+
+      - name: Build ROM
+        env:
+          AB_ROM_BASE64: ${{ secrets.AB_ROM_BASE64 }}
+        run: bash tools/build_rom.sh
+
+      - name: Upload ROM
+        uses: actions/upload-artifact@v4
+        with:
+          name: heart-and-soul-rom
+          path: dist/*.gba
+          if-no-files-found: warn

@@ -1,0 +1,119 @@
+{
+  "id": "mycelial_warden",
+  "name": "Mycelial Warden",
+  "epithet": "Bulwark of the Rotting Grove",
+  "archetype": "armoured guardian: ground slams, spore fields, punishes jumping",
+  "inspiration": "Hollow Knight \u2014 False Knight armour-break / Broken Vessel (behaviour only)",
+  "hp": 960,
+  "poise": 180,
+  "phases": {
+    "phase2_hp_pct": 60,
+    "phase3_hp_pct": 25
+  },
+  "movement": {
+    "walk_speed": 1,
+    "aggression": 110
+  },
+  "attacks": [
+    {
+      "id": "bulwark_swipe",
+      "name": "Bulwark Swipe",
+      "kind": "melee",
+      "telegraph": 20,
+      "active": 6,
+      "recovery": 26,
+      "damage": 24,
+      "poise_damage": 24,
+      "range_min": 0,
+      "range_max": 56,
+      "height": 28,
+      "lunge": 0,
+      "weight": 45,
+      "min_phase": 1
+    },
+    {
+      "id": "spore_burst",
+      "name": "Spore Burst",
+      "kind": "area",
+      "telegraph": 30,
+      "active": 12,
+      "recovery": 28,
+      "damage": 18,
+      "poise_damage": 16,
+      "range_min": 0,
+      "range_max": 88,
+      "height": 32,
+      "lunge": 0,
+      "weight": 25,
+      "min_phase": 1
+    },
+    {
+      "id": "roll_charge",
+      "name": "Rolling Charge",
+      "kind": "lunge",
+      "telegraph": 24,
+      "active": 14,
+      "recovery": 34,
+      "damage": 30,
+      "poise_damage": 32,
+      "range_min": 52,
+      "range_max": 120,
+      "height": 18,
+      "lunge": 6,
+      "weight": 30,
+      "min_phase": 2
+    },
+    {
+      "id": "mycelial_grasp",
+      "name": "Mycelial Grasp",
+      "kind": "projectile",
+      "telegraph": 16,
+      "active": 6,
+      "recovery": 20,
+      "damage": 16,
+      "poise_damage": 10,
+      "range_min": 60,
+      "range_max": 140,
+      "height": 24,
+      "lunge": 0,
+      "weight": 20,
+      "min_phase": 2
+    },
+    {
+      "id": "collapse",
+      "name": "Collapse",
+      "kind": "area",
+      "telegraph": 34,
+      "active": 16,
+      "recovery": 44,
+      "damage": 38,
+      "poise_damage": 40,
+      "range_min": 0,
+      "range_max": 72,
+      "height": 48,
+      "lunge": 0,
+      "weight": 10,
+      "min_phase": 3
+    },
+    {
+      "id": "warden_flurry",
+      "name": "Warden Flurry",
+      "kind": "melee",
+      "telegraph": 10,
+      "active": 12,
+      "recovery": 22,
+      "damage": 14,
+      "poise_damage": 12,
+      "range_min": 0,
+      "range_max": 64,
+      "height": 26,
+      "lunge": 2,
+      "weight": 20,
+      "min_phase": 3
+    }
+  ],
+  "provenance": {
+    "origin": "authored",
+    "notes": "Exists to teach the player that aerial attacks lose to ground-only hitboxes."
+  }
+}
