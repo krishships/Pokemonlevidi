@@ -81,6 +81,9 @@ jobs:
       - name: Build ROM
         run: bash tools/build_rom.sh
 
+      - name: Validate ROM header
+        run: python3 tools/romcheck.py dist/heart-and-soul.gba
+
       - name: Upload ROM
         uses: actions/upload-artifact@v4
         with:
