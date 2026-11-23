@@ -75,3 +75,10 @@ composite sprite plus one hitbox flash, and cap active projectiles at 8.
 3. Convert one arena (Sentinel of Ash) end to end: entry, camera, HUD, win,
    loss.
 4. Only then add the remaining five bosses.
+
+## If this repo is public
+
+Do not add `AB_ROM_BASE64` to a public repository. Keep `AB_ENABLE_ROM_BUILD`
+unset, or keep the ROM build in a private mirror and push only source here. The
+`rom-build` job is gated to manual `workflow_dispatch` runs for exactly this
+reason: a pull request must never be able to reach a base ROM.

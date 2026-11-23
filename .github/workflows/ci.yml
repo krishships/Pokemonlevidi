@@ -58,7 +58,8 @@ jobs:
     # Optional: only runs when the repo variable AB_ENABLE_ROM_BUILD is 'true'
     # and the secret AB_ROM_BASE64 holds a base ROM you dumped yourself.
     name: GBA ROM (optional)
-    if: vars.AB_ENABLE_ROM_BUILD == 'true'
+    # Manual runs only: a base ROM secret must never be reachable from a PR.
+    if: vars.AB_ENABLE_ROM_BUILD == 'true' && github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     container: devkitpro/devkitarm:latest
     continue-on-error: true
