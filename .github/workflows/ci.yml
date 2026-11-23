@@ -153,3 +153,23 @@ jobs:
             base/pokered/*.gb
             base/pokered/*.gbc
           if-no-files-found: error
+
+  ui-test:
+    name: UI test (headless browser)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install browser
+        run: |
+          npm init -y >/dev/null 2>&1
+          npm i --silent puppeteer-core@24
+          npx --yes puppeteer browsers install chrome
+
+      - name: Run the UI test
+        run: node tests/ui.test.js

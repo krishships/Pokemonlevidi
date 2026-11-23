@@ -446,14 +446,17 @@ let lastRam = null;
 const history = [];
 
 /* ------------------------------------------------------------- brain - */
+/* Order matters. Specific directions are matched before generic verbs, or
+ * "go left" resolves to "up" because of the word "go". */
 const RULES = [
-  { act: 'up',    words: ['up', 'north', 'forward', 'ahead', 'go'] },
-  { act: 'down',  words: ['down', 'south', 'back'] },
   { act: 'left',  words: ['left', 'west'] },
   { act: 'right', words: ['right', 'east'] },
-  { act: 'talk',  words: ['talk', 'speak', 'ask', 'greet', 'hello', 'interact', 'a'] },
+  { act: 'down',  words: ['down', 'south', 'backwards', 'back up'] },
+  { act: 'up',    words: ['up', 'north'] },
+  { act: 'stop',  words: ['stop', 'wait', 'hold', 'rest', 'stay still', 'do not'] },
   { act: 'menu',  words: ['menu', 'bag', 'pokemon', 'party', 'inventory', 'start'] },
-  { act: 'stop',  words: ['stop', 'wait', 'hold', 'rest', 'stay', 'no'] }
+  { act: 'talk',  words: ['talk', 'speak', 'ask', 'greet', 'hello', 'interact', 'say hi'] },
+  { act: 'up',    words: ['go', 'walk', 'move', 'forward', 'ahead'] }
 ];
 
 function localIntent(text) {
