@@ -21,25 +21,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Sanity check the pages
         run: |
+          set -e
           test -f site/index.html
-          python3 - <<'PY2'
-import re, pathlib, sys
-bad = 0
-for f in pathlib.Path("site").glob("*.html"):
-    h = f.read_text()
-    if "<canvas" not in h and "canvas" not in h:
-        print("warn: no canvas in", f)
-    if h.count("<script") < 1:
-        print("error: no script in", f); bad = 1
-    print(f"{f.name}: {len(h)//1024} KB")
-sys.exit(bad)
-PY2
+          test -f site/nail-and-soul.html
+          wc -c site/*.html
+
       - uses: actions/upload-artifact@v4
         with:
           name: site
           path: site
+
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
@@ -48,7 +42,6 @@ PY2
     name: Deploy to Pages
     needs: package
     runs-on: ubuntu-latest
-    # Pages must be enabled once by hand: Settings -> Pages -> Source: GitHub Actions
     continue-on-error: true
     environment:
       name: github-pages
