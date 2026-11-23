@@ -16,7 +16,7 @@ See [docs/LEGAL.md](docs/LEGAL.md).
 | Portable real-time battle core (`src/action_battle.c`) | **working**, 88 host tests green |
 | Boss data pipeline (JSON → C tables) | **working**, CI-enforced |
 | Boss roster (6 bosses, 36 attacks) | **authored**, tuning in progress |
-| Graft onto `pret/pokeemerald` | **documented**, not yet applied in-tree |
+| Graft onto `pret/pokeemerald` | **patch applies cleanly** @ 9103e52; ARM build unverified |
 | Field art, maps, story content | not started |
 
 The battle core is deliberately engine-agnostic: it compiles with plain C11 on

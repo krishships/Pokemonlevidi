@@ -12,7 +12,7 @@ fi
 
 echo "== copying headers"
 mkdir -p "$BASE_DIR/include/generated"
-cp include/action_battle.h "$BASE_DIR/include/"
+cp include/*.h "$BASE_DIR/include/"
 cp include/generated/*.h "$BASE_DIR/include/generated/"
 
 echo "== copying sources"
