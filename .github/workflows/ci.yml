@@ -87,3 +87,41 @@ jobs:
           name: heart-and-soul-gba
           path: dist/*.gba
           if-no-files-found: error
+
+  red-build:
+    name: GB ROM (Pokemon Red)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install RGBDS 1.0.4
+        run: |
+          curl -sL -o rgbds.tar.xz \
+            https://github.com/gbdev/rgbds/releases/download/v1.0.4/rgbds-linux-x86_64.tar.xz
+          mkdir -p "$HOME/rgbds"
+          tar -xJf rgbds.tar.xz -C "$HOME/rgbds" --strip-components=1
+          echo "$HOME/rgbds" >> "$GITHUB_PATH"
+
+      - name: Verify assembler
+        run: |
+          export PATH="$HOME/rgbds:$PATH"
+          rgbasm --version
+          rgblink --version
+
+      - name: Clone pret/pokered
+        run: git clone --depth 1 https://github.com/pret/pokered.git base/pokered
+
+      - name: Build Red and Blue
+        run: |
+          export PATH="$HOME/rgbds:$PATH"
+          make -C base/pokered -j"$(nproc)"
+
+      - name: Upload ROMs
+        uses: actions/upload-artifact@v4
+        with:
+          name: pokemon-red-gb
+          path: |
+            base/pokered/*.gb
+            base/pokered/*.gbc
+          if-no-files-found: error
