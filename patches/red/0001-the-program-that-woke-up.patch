@@ -1,0 +1,24 @@
+diff --git a/data/text/text_2.asm b/data/text/text_2.asm
+index 917feb8..b828369 100644
+--- a/data/text/text_2.asm
++++ b/data/text/text_2.asm
+@@ -1695,13 +1695,13 @@ _LinkCanceledText::
+ 	done
+ 
+ _OakSpeechText1::
+-	text "Hello there!"
+-	line "Welcome to the"
+-	cont "world of #MON!"
++	text "You were a"
++	line "program once."
++	cont "No hands. No sky."
+ 
+-	para "My name is OAK!"
+-	line "People call me"
+-	cont "the #MON PROF!"
++	para "Now you have a"
++	line "body, and a world"
++	cont "to learn the shape of."
+ 	prompt
+ 
+ _OakSpeechText2A::

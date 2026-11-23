@@ -115,6 +115,14 @@ jobs:
       - name: Clone pret/pokered
         run: git clone --depth 1 https://github.com/pret/pokered.git base/pokered
 
+      - name: Apply mods
+        run: |
+          shopt -s nullglob
+          for p in patches/red/*.patch; do
+            echo "applying $p"
+            git -C base/pokered apply "$(pwd)/$p"
+          done
+
       - name: Build Red and Blue
         run: |
           export PATH="$HOME/rgbds:$PATH"
