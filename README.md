@@ -23,6 +23,19 @@ The battle core is deliberately engine-agnostic: it compiles with plain C11 on
 the host (for tests) and on the GBA's ARM7TDMI (for the ROM). Only
 `src/pokeemerald/ab_bridge.c` knows about the game engine.
 
+## Visual reference
+
+`docs/img/` holds the rendered dossiers — open any of them directly on GitHub:
+
+| File | Shows |
+| --- | --- |
+| `how_it_works.png` | the boss loop, your toolkit, the turn-based → live mapping, phase flow |
+| `combat_timeline.png` | one attack frame by frame, with the dash/jump/punish windows marked |
+| `boss_<id>.png` | one dossier per boss: silhouette, stats, phase thresholds, full attack table |
+
+All art in them is drawn from primitives by `tools/render_cards.py` — original
+placeholder silhouettes, no ripped sprites.
+
 ## Layout
 
 ```
