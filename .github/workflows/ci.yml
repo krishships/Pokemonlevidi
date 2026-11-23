@@ -100,7 +100,10 @@ jobs:
           curl -sL -o rgbds.tar.xz \
             https://github.com/gbdev/rgbds/releases/download/v1.0.4/rgbds-linux-x86_64.tar.xz
           mkdir -p "$HOME/rgbds"
-          tar -xJf rgbds.tar.xz -C "$HOME/rgbds" --strip-components=1
+          # the tarball has no top-level directory: extract as-is
+          tar -xJf rgbds.tar.xz -C "$HOME/rgbds"
+          chmod +x "$HOME/rgbds"/rgb*
+          ls -l "$HOME/rgbds"
           echo "$HOME/rgbds" >> "$GITHUB_PATH"
 
       - name: Verify assembler
