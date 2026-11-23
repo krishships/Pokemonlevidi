@@ -40,6 +40,7 @@ function check(name, cond, detail) {
 (async () => {
   const server = http.createServer((req, res) => {
     const url = req.url.split('?')[0];
+    if (url === '/favicon.ico') { res.writeHead(204); res.end(); return; }
     const file = path.join(SITE, url === '/' ? 'index.html' : url);
     fs.readFile(file, (err, data) => {
       if (err) { res.writeHead(404); res.end('nope'); return; }
