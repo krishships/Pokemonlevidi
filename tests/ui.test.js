@@ -142,10 +142,10 @@ function check(name, cond, detail) {
 
   // ---------- 4. API mode: request shape, vision, JSON decode
   await page.evaluate(() => {
-    const s = JSON.parse(localStorage.getItem('whisper.settings.v1') || '{}');
+    const s = JSON.parse(localStorage.getItem('emerald.whisper.v1') || '{}');
     s.mode = 'api'; s.apikey = 'test-key-123'; s.model = 'gpt-4o-mini';
     s.endpoint = 'https://api.example.com/v1/chat/completions';
-    localStorage.setItem('whisper.settings.v1', JSON.stringify(s));
+    localStorage.setItem('emerald.whisper.v1', JSON.stringify(s));
   });
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.evaluate(() => {
@@ -164,7 +164,8 @@ function check(name, cond, detail) {
   const api = await page.evaluate(() => ({
     log: document.getElementById('log').innerText,
     shots: window.__shotCalls,
-    preview: document.getElementById('preview').style.display
+    preview: document.getElementById('preview').getAttribute('src') || '',
+    eyes: document.getElementById('eyes').style.display
   }));
 
   check('API request was made', apiRequest !== null);
@@ -172,12 +173,13 @@ function check(name, cond, detail) {
     check('auth header sent', /Bearer test-key-123/.test(apiRequest.headers.authorization || ''));
     const msgs = apiRequest.body.messages || [];
     check('persona sent as system message', msgs[0] && msgs[0].role === 'system' && /Kaito/.test(msgs[0].content));
-    const parts = msgs[1] && Array.isArray(msgs[1].content) ? msgs[1].content : [];
-    check('frame sent as image_url', parts.some(p => p.type === 'image_url' && p.image_url.url.startsWith('data:image')));
+    const parts = msgs.flatMap(m => Array.isArray(m.content) ? m.content : []);
+    check('frame sent as image_url',
+      parts.some(p => p.type === 'image_url' && p.image_url.url.startsWith('data:image')));
     check('whisper text included', JSON.stringify(msgs).includes('what do you see'));
   }
   check('screenshot was taken', api.shots > 0, 'calls=' + api.shots);
-  check('preview shown', api.preview === 'block');
+  check('preview shown', api.preview.startsWith('data:image') && api.eyes === 'flex');
   check('model reply decoded and shown', api.log.includes('i see a path'), api.log.slice(-120));
   check('no JS errors in API flow', errors.length === 0, errors.join(' | '));
 

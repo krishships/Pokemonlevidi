@@ -1,111 +1,74 @@
-# Pokémon Heart and Soul — Live Battle
+# Emerald — an AI plays, you speak
 
-A **decomp-style ROM hack project** for *Pokémon Heart and Soul*, built on the
-`pret/pokeemerald` codebase, whose defining feature is replacing the stock
-turn-based battle engine with a **real-time action battle** — dodge, dash,
-telegraph-read, punish — in the spirit of Hollow Knight-style boss fights.
+A Pokémon Emerald ROM, built from source, plus a page that runs it and puts an
+AI in the driver's seat. He cannot call an API from inside the cartridge — no
+network on a GBA — so the brain lives in the browser, reads the screen, presses
+the buttons, and talks to you.
 
-This repository holds the hack's own code, data and tooling. It does **not**
-contain a ROM, a ROM base, or any ripped Nintendo / Team Cherry assets.
-See [docs/LEGAL.md](docs/LEGAL.md).
+You are not a character. You are the voice he hears.
 
-## Status
-
-| Part | State |
-| --- | --- |
-| Portable real-time battle core (`src/action_battle.c`) | **working**, 88 host tests green |
-| Boss data pipeline (JSON → C tables) | **working**, CI-enforced |
-| Boss roster (6 bosses, 36 attacks) | **authored**, tuning in progress |
-| Graft onto `pret/pokeemerald` | **patch applies cleanly** @ 9103e52; ARM build unverified |
-| Field art, maps, story content | not started |
-
-The battle core is deliberately engine-agnostic: it compiles with plain C11 on
-the host (for tests) and on the GBA's ARM7TDMI (for the ROM). Only
-`src/pokeemerald/ab_bridge.c` knows about the game engine.
-
-## Visual reference
-
-`docs/img/` holds the rendered dossiers — open any of them directly on GitHub:
-
-| File | Shows |
-| --- | --- |
-| `how_it_works.png` | the boss loop, your toolkit, the turn-based → live mapping, phase flow |
-| `combat_timeline.png` | one attack frame by frame, with the dash/jump/punish windows marked |
-| `boss_<id>.png` | one dossier per boss: silhouette, stats, phase thresholds, full attack table |
-
-All art in them is drawn from primitives by `tools/render_cards.py` — original
-placeholder silhouettes, no ripped sprites.
-
-## Layout
+## What is here
 
 ```
-include/action_battle.h        public API of the battle core
-include/generated/bosses.h     generated — do not edit
-src/action_battle.c            the live battle simulation
-src/generated/bosses_data.c    generated — do not edit
-src/pokeemerald/ab_bridge.c    engine glue (GBA build only)
-data/bosses/*.json             source of truth for every boss
-data/boss_sources.json         where imported bosses came from + licence gate
-tests/test_action_battle.c     host test suite
-tools/                         codegen, validation, boss import, ROM build
-docs/design/                   battle system + boss roster specs
-docs/GRAFTING.md               how to graft this onto pokeemerald
-.github/workflows/ci.yml       validate → codegen check → build → test
+site/index.html        the whisper interface: emulator, AI, settings
+tools/fetch_base.sh    fetch the pinned pokeemerald base
+tools/build_rom.sh     build the ROM (MODERN=1, arm-none-eabi)
+tools/romcheck.py      validate the built GBA header
+tools/boottest.c       headless GB boot test (binjgb, no display)
+patches/red/           mods against pret/pokered
+tests/ui.test.js       headless browser test of the whisper page
+.github/workflows/     emerald build · red build · UI test · pages
 ```
 
-## Quick start
+## The two halves
+
+**The ROM** is plain Emerald, built from the decompilation. No base ROM is
+needed — `pokeemerald` compiles its own image. CI produces `emerald-gba`.
+
+**The AI** is `site/index.html`. Load the ROM into it, and:
+
+- he sees the screen — a frame is captured through the core's own screenshot
+  command and sent to the model with every whisper
+- he moves — the model answers with an action and a number of steps, which
+  become button presses
+- he remembers — the last few exchanges go back with each request
+- you speak — type, and it arrives as a voice he treats as divine
+
+## Settings
+
+Open **API key · persona · brain**:
+
+| Field | |
+| --- | --- |
+| Brain | `local` (keywords, offline, no key) or `api` (a model) |
+| API key | kept in this browser only, sent to your endpoint and nowhere else |
+| Endpoint | any OpenAI-compatible chat endpoint |
+| Model | must accept images, e.g. `gpt-4o-mini` |
+| Persona | his whole self; edit it freely |
+
+With no key, or if a request fails, he falls back to the local brain instead of
+going silent.
+
+## Limits, stated plainly
+
+- **No API inside the ROM.** A GBA has no network. The brain is always outside.
+- **Vision is screenshots, not memory.** The shipped EmulatorJS cores do not
+  export `retro_get_memory_data`, so he reads pixels, not RAM. The page probes
+  for it and uses it if a future core exposes it.
+- **He sees one frame per whisper**, not continuous video.
+
+## Build locally
 
 ```bash
-make check     # validate boss JSON + verify generated tables are current
-make test      # compile the core and run the test suite
+bash tools/fetch_base.sh     # clone the pinned base into base/
+bash tools/build_rom.sh      # → dist/heart-and-soul.gba
+python3 tools/romcheck.py dist/heart-and-soul.gba
 ```
 
-No compiler? `pip install ziglang` then
-`python3 -m ziglang cc -std=c11 -O2 -Iinclude src/action_battle.c src/generated/bosses_data.c tests/test_action_battle.c -o build/ab_test`.
+Needs `arm-none-eabi-gcc`, `make`, `python3`, `libpng-dev`.
 
-## Adding a boss
+## Licences
 
-1. Drop a JSON file in `data/bosses/<id>.json` (copy an existing one, or
-   `python3 tools/import_bosses.py --pack <file-or-raw-url>`).
-2. `python3 tools/validate_bosses.py` — fix anything it flags.
-3. `python3 tools/gen_bosses.py` — regenerates the C tables.
-4. `make test` — the roster test plays every boss for 3600 frames and checks
-   HP, phase and arena invariants.
-
-Design rules for attacks (telegraph length, damage bands, phase gating) are in
-[docs/design/ACTION_BATTLE_SPEC.md](docs/design/ACTION_BATTLE_SPEC.md).
-
-## How the battle works
-
-Turn-based concepts are mapped one-for-one onto real-time ones, so existing
-species data stays meaningful:
-
-| Turn-based | Live battle |
-| --- | --- |
-| HP | HP (unchanged) |
-| Speed | attack cooldown + boss aggression |
-| Accuracy | hitbox overlap — you can dodge |
-| PP | soul charge (0–100), spent on focus-heal |
-| Status / flinch | poise break → stagger |
-| Switching | none — you are locked in the arena |
-| Items in battle | focus-heal (hold) and the Poké Flute |
-
-Details, frame timings and the engine hook points:
-[docs/design/ACTION_BATTLE_SPEC.md](docs/design/ACTION_BATTLE_SPEC.md).
-
-## Roadmap
-
-- [ ] Graft onto `pret/pokeemerald` and get a bootable build (see GRAFTING.md)
-- [ ] Replace the instant-hit projectile approximation with travelling hitboxes
-- [ ] Boss arena maps + intro cutscene hooks
-- [ ] Audio cues per telegraph stage
-- [ ] Balance pass on the roster with real playtests
-
-## Credits & licences
-
-Code and data in this repository: MIT (see `LICENSE`).
-Boss *designs* are original; the mechanics are inspired by Hollow Knight
-(Team Cherry) and by open Hollow Knight fan projects listed in
-`data/boss_sources.json` — used as **references only**, no assets taken.
-Pokémon is © Nintendo / Creatures Inc. / GAME FREAK inc. This is a
-non-commercial fan project, not affiliated with or endorsed by them.
+Code here: MIT. No ROM images or ripped assets are in this repository —
+the game is compiled from the public decompilation at build time. Pokémon is
+© Nintendo / Creatures / GAME FREAK. See `docs/LEGAL.md`.

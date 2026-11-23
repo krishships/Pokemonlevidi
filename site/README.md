@@ -1,6 +1,6 @@
-# Site
+# site
 
-- `index.html` — the whisper emulator: load a ROM, speak, an AI with eyes plays it.
-- `nail-and-soul.html` — the standalone action game (nine bosses, AI pilot, whispers).
+`index.html` — the whisper interface. One file, no build step.
 
-Deployed to GitHub Pages by `.github/workflows/pages.yml` on every push to `site/`.
+Deployed by `.github/workflows/pages.yml`; packaged as the `site` artifact on
+every push.
