@@ -14,8 +14,6 @@
  * Rendering, camera and audio are NOT implemented here yet; see the TODO
  * block at the bottom. Nothing in this file draws to the screen.
  */
-#ifdef POKEMERALD
-
 #include "global.h"
 #include "battle.h"
 #include "battle_main.h"
@@ -181,4 +179,3 @@ bool8 AbBridge_Tick(void)
  *      before it can call AbBridge_StartForTrainer()
  * ------------------------------------------------------------------------- */
 
-#endif /* POKEMERALD */
