@@ -29,3 +29,5 @@ jobs:
         run: node tests/pure.test.js
       - name: Run UI test
         run: node tests/ui.test.js
+      - name: Two-model split (eyes vs brain)
+        run: node tests/split.test.js
