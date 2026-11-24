@@ -51,6 +51,17 @@ const server = http.createServer((q, r) => {
 });
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+/* CI is slower than a laptop. Wait for the thing to happen instead of
+ * guessing a duration. */
+async function waitFor(fn, ms) {
+  const end = Date.now() + (ms || 25000);
+  while (Date.now() < end) {
+    if (fn()) return true;
+    await sleep(250);
+  }
+  return fn();
+}
 let fails = 0;
 const check = (n, ok, extra) => { if (!ok) fails++; console.log((ok ? '  PASS ' : '  FAIL ') + n + (ok || !extra ? '' : '  ' + extra)); };
 
@@ -103,7 +114,8 @@ const check = (n, ok, extra) => { if (!ok) fails++; console.log((ok ? '  PASS ' 
   });
   await sleep(1200);
   await page.evaluate(() => { const b = document.getElementById('startAI'); if (b) b.click(); });
-  await sleep(6000);
+  await waitFor(() => calls.some(c => c.model === 'qwen/qwen3.8-27b') &&
+                      calls.some(c => c.model === 'brain-model'), 30000);
 
   const eyes = calls.filter(c => c.model === 'qwen/qwen3.8-27b');
   const brain = calls.filter(c => c.model === 'brain-model');
@@ -134,7 +146,7 @@ const check = (n, ok, extra) => { if (!ok) fails++; console.log((ok ? '  PASS ' 
   });
   await sleep(1200);
   await page.evaluate(() => { const b = document.getElementById('startAI'); if (b) b.click(); });
-  await sleep(14000);
+  await waitFor(() => calls.some(c => c.hasImage) && calls.some(c => !c.hasImage), 35000);
 
   const withImg = calls.filter(c => c.hasImage).length;
   const without = calls.filter(c => !c.hasImage).length;
