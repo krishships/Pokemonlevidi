@@ -69,6 +69,8 @@ function check(name, cond, detail) {
     if (m.type() !== 'error') return;
     const t = m.text();
     if (t.includes('ERR_CERT_AUTHORITY_INVALID')) return;  // sandbox proxy
+    // the page probes for emerald.gba next to itself; a 404 there is expected
+    if (t.includes('404') && t.includes('Failed to load resource')) return;
     errors.push('console: ' + t);
   });
 

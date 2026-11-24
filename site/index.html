@@ -143,6 +143,7 @@
     <label>API KEY</label>
     <input type="password" id="apikey" placeholder="paste your key" autocomplete="off">
     <div class="hint" id="keyhint"></div>
+    <div class="hint" id="keyurl"></div>
     <div class="hint">Stored in this browser only. Sent to the endpoint below and nowhere else.</div>
 
     <label>ENDPOINT</label>
@@ -261,6 +262,21 @@ const PRESETS = {
   openai: { endpoint: 'https://api.openai.com/v1/chat/completions', model: 'gpt-4o-mini' }
 };
 /* the key tells you the provider; you should not have to pick a model */
+const KEYURL = {
+  groq:       'https://console.groq.com/keys',
+  openai:     'https://platform.openai.com/api-keys',
+  openrouter: 'https://openrouter.ai/keys',
+  ollama:     'https://ollama.com/download'
+};
+
+function showKeyUrl(provider) {
+  const el = $('keyurl');
+  if (!el) return;
+  const u = KEYURL[provider];
+  if (!u) { el.innerHTML = ''; return; }
+  el.innerHTML = 'get a key: <a href="' + u + '" target="_blank" rel="noopener">' + u.replace(/^https:\/\//, '') + '</a>';
+}
+
 function detectProvider(key) {
   const k = String(key || '').trim();
   if (/^gsk_/.test(k)) return 'groq';
@@ -308,6 +324,7 @@ function keyDetect() {
   const p = detectProvider(k);
   const hint = $('keyhint');
   if (hint) hint.textContent = p ? ('detected: ' + p + ' — endpoint and model set to match') : (k ? 'unrecognised key format' : '');
+  if (p) showKeyUrl(p);
   if (!p) return;
   const preset = PRESETS[p];
   if (!preset) return;
@@ -317,8 +334,8 @@ function keyDetect() {
 $('apikey').addEventListener('input', keyDetect);
 $('apikey').addEventListener('blur', keyDetect);
 
-$('presetGroq').addEventListener('click', () => { $('endpoint').value = PRESETS.groq.endpoint; $('model').value = PRESETS.groq.model; });
-$('presetOpenai').addEventListener('click', () => { $('endpoint').value = PRESETS.openai.endpoint; $('model').value = PRESETS.openai.model; });
+$('presetGroq').addEventListener('click', () => { $('endpoint').value = PRESETS.groq.endpoint; $('model').value = PRESETS.groq.model; showKeyUrl('groq'); });
+$('presetOpenai').addEventListener('click', () => { $('endpoint').value = PRESETS.openai.endpoint; $('model').value = PRESETS.openai.model; showKeyUrl('openai'); });
 $('save').addEventListener('click', () => {
   const hadKey = !!S.apikey;
   collect();
@@ -658,6 +675,27 @@ $('fs').addEventListener('click', async () => {
 
 $('send').addEventListener('click', speak);
 $('whisper').addEventListener('keydown', (e) => { if (e.key === 'Enter') speak(); });
+
+/* If a ROM is dropped next to the page (emerald.gba, git-ignored), load it
+   without making the user pick a file every time. A 404 is not an error. */
+(async function autoLoadRom() {
+  for (const name of ['emerald.gba', 'roms/emerald.gba']) {
+    try {
+      const r = await fetch(name, { method: 'HEAD' });
+      if (!r.ok) continue;
+      const blob = await (await fetch(name)).blob();
+      if (blob.size < 1024 * 1024) continue;
+      const file = new File([blob], name.split('/').pop(), { type: 'application/octet-stream' });
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      const input = $('rom');
+      input.files = dt.files;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      log('sys', 'found ' + name + ' next to the page — loading it for you');
+      return;
+    } catch (e) { /* not there, that is fine */ }
+  }
+})();
 
 /* =========================================================== test the AI */
 $('testai').addEventListener('click', async () => {
