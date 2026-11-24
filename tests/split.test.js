@@ -42,7 +42,8 @@ const server = http.createServer((q, r) => {
     });
     return;
   }
-  const f = path.join(SITE, q.url === '/' ? 'index.html' : q.url.split('?')[0]);
+  const u = q.url.split('?')[0];
+  const f = path.join(SITE, u === '/' ? 'index.html' : u);
   fs.readFile(f, (e, d) => {
     if (e) { r.writeHead(404); return r.end(); }
     r.writeHead(200, { 'Content-Type': f.endsWith('.html') ? 'text/html' : 'application/octet-stream' });
@@ -72,7 +73,8 @@ const check = (n, ok, extra) => { if (!ok) fails++; console.log((ok ? '  PASS ' 
     args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--ignore-certificate-errors']
   });
   const page = await browser.newPage();
-  await page.goto('http://localhost:8977/', { waitUntil: 'domcontentloaded' });
+  await page.goto('http://localhost:8977/?api=http://localhost:8977/v1/chat/completions',
+                  { waitUntil: 'domcontentloaded' });
 
   // stub the emulator, like the other test does
   await page.evaluate(() => {
@@ -96,7 +98,8 @@ const check = (n, ok, extra) => { if (!ok) fails++; console.log((ok ? '  PASS ' 
     s.eyesModel = 'qwen/qwen3.8-27b'; s.gap = 1;
     localStorage.setItem('redexe.v1', JSON.stringify(s));
   });
-  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.goto('http://localhost:8977/?api=http://localhost:8977/v1/chat/completions',
+                  { waitUntil: 'domcontentloaded' });
   await page.evaluate(() => {
     window.__png = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='), c => c.charCodeAt(0));
     window.__shot = 0;
@@ -133,7 +136,8 @@ const check = (n, ok, extra) => { if (!ok) fails++; console.log((ok ? '  PASS ' 
     st.model = 'brain-model'; st.imgEvery = 3; st.gap = 1;
     localStorage.setItem('redexe.v1', JSON.stringify(st));
   });
-  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.goto('http://localhost:8977/?api=http://localhost:8977/v1/chat/completions',
+                  { waitUntil: 'domcontentloaded' });
   await page.evaluate(() => {
     window.__png = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='), c => c.charCodeAt(0));
     window.__shot = 0;

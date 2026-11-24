@@ -111,7 +111,7 @@ function check(name, cond, detail) {
     }
     if (u.includes('/v1/chat/completions')) {
       apiCalls++;
-      apiRequest = { headers: req.headers(), body: JSON.parse(req.postData() || '{}') };
+      apiRequest = { url: u, headers: req.headers(), body: JSON.parse(req.postData() || '{}') };
       return req.respond({
         status: 200,
         headers: { 'Access-Control-Allow-Origin': '*' },
@@ -165,6 +165,7 @@ function check(name, cond, detail) {
   await page.evaluate(() => {
     const s = JSON.parse(localStorage.getItem('redexe.v1') || '{}');
     s.mode = 'api'; s.apikey = 'test-key-123'; s.model = 'gpt-4o-mini'; s.gap = 1;
+    // a stale endpoint in storage must be ignored: Groq is the only provider
     s.endpoint = 'https://api.example.com/v1/chat/completions';
     localStorage.setItem('redexe.v1', JSON.stringify(s));
   });
@@ -190,6 +191,7 @@ function check(name, cond, detail) {
   }));
 
   check('API request was made', apiRequest !== null);
+  check('request went to the Groq endpoint', /api\.groq\.com\/openai\/v1\/chat\/completions/.test(apiRequest.url || ''), apiRequest.url);
   if (apiRequest) {
     check('auth header sent', /Bearer test-key-123/.test(apiRequest.headers.authorization || ''));
     const msgs = apiRequest.body.messages || [];

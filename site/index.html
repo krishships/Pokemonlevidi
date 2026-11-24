@@ -370,7 +370,25 @@ const DEFAULTS = Object.assign({
 }, PRESETS.groq);
 const STORE = 'redexe.v1';
 let S = Object.assign({}, DEFAULTS);
-try { const raw = localStorage.getItem(STORE); if (raw) S = Object.assign(S, JSON.parse(raw)); } catch (e) {}
+let staleEndpoint = '';
+try {
+  const raw = localStorage.getItem(STORE);
+  if (raw) {
+    const saved = JSON.parse(raw);
+    if (saved.endpoint && saved.endpoint !== DEFAULTS.endpoint) staleEndpoint = saved.endpoint;
+    S = Object.assign(S, saved);
+  }
+} catch (e) {}
+/* The endpoint is not a preference, it is a constant: Groq is the only provider.
+ * A stale URL kept in this browser's storage used to be sent anyway, which is
+ * how a POST ended up at a static host and came back "405 Not Allowed". */
+S.endpoint = DEFAULTS.endpoint;
+/* ?api=<url> overrides the endpoint. Useful when a provider blocks browser
+ * calls and you put a small proxy in front of it. Nothing else can change it. */
+try {
+  const q = new URLSearchParams(location.search).get('api');
+  if (q && /^https?:\/\//.test(q)) S.endpoint = q;
+} catch (e) {}
 if (OLD_PERSONAS.includes(S.persona)) S.persona = DEFAULT_PERSONA;   // upgrade an untouched old default; custom personas stay
 
 const $ = (id) => document.getElementById(id);
@@ -393,6 +411,11 @@ function paintSettings() {
   paintStatus();
 }
 function persist() { try { localStorage.setItem(STORE, JSON.stringify(S)); } catch (e) {} }
+if (staleEndpoint) {
+  setTimeout(() => log('sys', 'your saved endpoint (' + staleEndpoint.slice(0, 60) +
+    '...) is not Groq. Reset to ' + DEFAULTS.endpoint + ' — press SAVE to keep it.'), 600);
+}
+
 function collect() {
   S.apikey = $('apikey').value.trim();
   S.endpoint = $('endpoint').value.trim() || DEFAULTS.endpoint;
