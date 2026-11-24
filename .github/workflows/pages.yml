@@ -28,6 +28,14 @@ jobs:
           test -f site/index.html
           wc -c site/*.html
 
+      - name: Stamp the build id
+        shell: bash
+        run: |
+          SHORT=$(echo "$GITHUB_SHA" | cut -c1-7)
+          sed -i "s/__BUILD__/$SHORT/" site/index.html
+          grep -c "$SHORT" site/index.html
+          echo "stamped site/index.html with $SHORT"
+
       - uses: actions/upload-artifact@v4
         with:
           name: site

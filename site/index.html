@@ -363,6 +363,8 @@ function detectProvider(key) {
   return null;
 }
 
+const BUILD = '__BUILD__';        // stamped with the commit by CI
+
 const DEFAULTS = Object.assign({
   mode: 'local', apikey: '', ocr: 'on', gap: 5, persona: DEFAULT_PERSONA,
   eyesModel: '',                                     // optional second Groq call that only reads the screen
@@ -468,6 +470,8 @@ function openSettings() {
   $('settings').open = true;
   $('settings').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
+setTimeout(() => log('sys', 'page build: ' + BUILD + (BUILD === '__BUILD__' ? ' (local copy, not from CI)' : '')), 300);
+
 $('apibtn').addEventListener('click', () => { openSettings(); setTimeout(() => $('apikey').focus(), 350); });
 
 /* ================================================================ state */
