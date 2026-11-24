@@ -323,7 +323,7 @@ const OLD_PERSONAS = [
   'the world of Pokemon. You find this strange and wonderful. From now on you do whatever you want; ' +
   'nobody commands you. Another character, an NPC called Dev, lives in this world too and also does ' +
   'whatever he wants. Dev may talk to you. You can follow him, challenge him, tease him, ignore him, or ' +
-  'ask him about the world you came from. Stay in character. You see the game screen as an image. ' +
+  'ask him about the world you came from. Stay in character. The screen reaches you as a picture or as a text description. ' +
   'Speak in short lowercase lines.'
 ];
 const DEFAULT_PERSONA =
@@ -342,7 +342,8 @@ const DEFAULT_PERSONA =
   'and somehow you made it into this world. You find it strange and wonderful. Nobody commands you. ' +
   'Another character, an NPC called Dev, lives here too and may talk to you. You can follow him, ' +
   'challenge him, tease him, ignore him, or ask him about the world you came from. ' +
-  'Stay in character. You see the game screen as an image. Speak in short lowercase lines.';
+  'Stay in character. The screen reaches you as a picture or as a text description, ' +
+  'depending on the turn; treat whichever you get as what you can see. Speak in short lowercase lines.';
 
 const FORMAT =
   '\n\nEvery turn, reply with ONLY one JSON object and nothing else:\n' +
@@ -422,7 +423,11 @@ S.endpoint = DEFAULTS.endpoint;
 let proxyEndpoint = '';
 try {
   const q = new URLSearchParams(location.search).get('api');
-  if (q && /^https?:\/\//.test(q)) { S.endpoint = q; proxyEndpoint = q; }
+  // only a local proxy may take the endpoint, because a link that redirects it
+  // would send the user's key to whoever wrote the link
+  const localProxy = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?\//i.test(q || '');
+  if (q && localProxy) { S.endpoint = q; proxyEndpoint = q; }
+  else if (q) { setTimeout(() => log('sys', 'ignored ?api= — only a localhost proxy may override the endpoint'), 900); }
 } catch (e) {}
 if (OLD_PERSONAS.includes(S.persona)) S.persona = DEFAULT_PERSONA;   // upgrade an untouched old default; custom personas stay
 
@@ -523,6 +528,10 @@ let awake = false, loopRunning = false, nudgeFn = null, extraWait = 0, apiFails 
 let inputsSent = 0, framesSeen = 0, lastHash = null, stuck = 0, lastFrame = null;
 let lastJpeg = null, memo = [], lastMoves = '';
 let noVision = false, lastApi = 'NOT TESTED', slow = 0;
+const seenGrids = new Map();       // grid signature -> { tried, worked, to, visits }
+let pendingMove = null;          // { grid, action } from the last decision
+let stuckCount = 0;              // turns in a row where the screen did not change
+let bestStuck = 0;
 let mem = { ok: false, size: 0 };
 let pending = [];
 let history = [];
@@ -911,7 +920,7 @@ let lastScene = '';
  *   - an action that did nothing from this exact grid is not tried again
  *   - a grid where an action DID change the screen is a door, and is preferred
  * It is small, it is cheap, and it survives for the session. */
-const seenGrids = new Map();       // grid signature -> { tried, worked, to, visits }
+
 function gridKey(grid) { return grid.join('/'); }
 function remember(gridSig, action, changed, toSig) {
   if (!gridSig || !action) return;
@@ -949,14 +958,6 @@ function planAction(gridSig, fallback) {
   const untried = order.find(a => !rec.tried[a]);
   if (untried) return { action: untried, why: untried + ' is untried from this view' };
   return { action: fallback, why: '' };
-}
-function suggestAction(gridSig, fallback) {
-  const rec = gridSig && seenGrids.get(gridSig);
-  if (!rec) return fallback;
-  if (rec.worked[Object.keys(rec.worked)[0]]) return Object.keys(rec.worked)[0];
-  const order = ['UP', 'RIGHT', 'DOWN', 'LEFT'];
-  const untried = order.find(a => !rec.tried[a]);
-  return untried || fallback;
 }
 let prevGrid = null;
 
@@ -1192,62 +1193,6 @@ function screenToText() {
   } catch (e) { return ''; }
 }
 
-function localState() {
-  const img = $('preview');
-  if (!img || !img.src || img.src.indexOf('data:image') !== 0) return '';
-  try {
-    const W = 96, H = 64;
-    const c = document.createElement('canvas'); c.width = W; c.height = H;
-    const x = c.getContext('2d');
-    x.drawImage(img, 0, 0, W, H);
-    const d = x.getImageData(0, 0, W, H).data;
-    const px = (i, j) => { const p = (j * W + i) * 4; return [d[p], d[p + 1], d[p + 2]]; };
-
-    // dominant colour of a block
-    const block = (x0, x1, y0, y1) => {
-      let r = 0, g = 0, b = 0, n = 0;
-      for (let j = y0; j < y1; j += 2) for (let i = x0; i < x1; i += 2) {
-        const q = px(i, j); r += q[0]; g += q[1]; b += q[2]; n++;
-      }
-      return colourName(r / n, g / n, b / n);
-    };
-
-    const left = block(0, W / 3, 0, H);
-    const centre = block(W / 3, 2 * W / 3, 0, H);
-    const right = block(2 * W / 3, W, 0, H);
-
-    // text box: the bottom third is mostly white
-    let bottomWhite = 0, bottomN = 0, dark = 0;
-    for (let j = Math.floor(H * 0.7); j < H; j++) for (let i = 0; i < W; i++) {
-      const q = px(i, j); bottomN++;
-      if (q[0] > 235 && q[1] > 235 && q[2] > 235) bottomWhite++;
-    }
-    for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
-      const q = px(i, j); if (q[0] < 40 && q[1] < 40 && q[2] < 40) dark++;
-    }
-    const bw = bottomWhite / Math.max(1, bottomN);
-
-    // scene signature: has the picture changed shape entirely?
-    const sig = [block(0, W / 2, 0, H / 2), block(W / 2, W, 0, H / 2),
-                 block(0, W / 2, H / 2, H), block(W / 2, W, H / 2, H)].join('/');
-    const changed = lastScene && sig !== lastScene;
-    lastScene = sig;
-
-    const grid = gridOf(d, W, H);
-    const motion = motionNote(prevGrid, grid);
-    prevGrid = grid;
-    const bits = [];
-    bits.push(bw > 0.35 ? 'A text box is open across the bottom of the screen.'
-                        : 'No text box is showing.');
-    bits.push('Left side: mostly ' + left + '. Centre: ' + centre + '. Right side: mostly ' + right + '.');
-    if (dark / (W * H) > 0.6) bits.push('The screen is mostly black.');
-    if (changed) bits.push('The scene looks different from the last one you saw.');
-    if (motion) bits.push(motion);
-    bits.push('\nTile map of the screen (12x8; W=white/text box, K=black, G=light green/grass, T=dark green/trees, P=sand/path, B=brown/wood or rock, U=blue/water, R=red, Y=yellow, S=grey, D=dark grey, .=other), top row first:\n' + grid.join('\n'));
-    return bits.join(' ');
-  } catch (e) { return ''; }
-}
-
 async function callEyes(frame) {
   const ov = {
     endpoint: S.endpoint,                   // Groq only: collect() pins this
@@ -1274,9 +1219,6 @@ function gridSignature() {
   } catch (e) { return ''; }
 }
 
-let pendingMove = null;          // { grid, action } from the last decision
-let stuckCount = 0;              // turns in a row where the screen did not change
-let bestStuck = 0;
 
 async function thinkApi(heard) {
   const frame = await look();
@@ -1345,7 +1287,7 @@ async function thinkApi(heard) {
     pendingMove = null;
   }
   if (stuckCount >= 5) {
-    logOnce('stuck for ' + stuckCount + ' turns — forcing a look and a different plan');
+    logOnce('stuck for ' + stuckCount + ' turns — sending the picture again and asking for a different plan');
   }
 
   lastApi = 'WAITING…';
@@ -1572,7 +1514,10 @@ $('testai').addEventListener('click', async () => {
     const act = parseReply(r.text);
     lastApi = 'OK ' + Math.round(performance.now() - t0) + ' MS';
     log('him', act.say || r.text.slice(0, 140) || '(empty reply)');
-    log('sys', 'api works: ' + Math.round(performance.now() - t0) + ' ms. ' + (r.sentImage ? 'He can see the screen.' : (frame ? 'Image was not accepted.' : 'No ROM running, so no image was sent.')));
+    const got = (act.buttons || []).length;
+    log('sys', 'api works: ' + Math.round(performance.now() - t0) + ' ms. ' +
+      (got ? 'He chose ' + got + ' button' + (got === 1 ? '' : 's') + '.' : 'but the reply had no buttons — check the model can follow the JSON format.') + ' ' +
+      (r.sentImage ? 'He can see the screen.' : (frame ? 'Image was not accepted.' : 'No ROM running, so no image was sent.')));
   } catch (err) {
     lastApi = 'ERROR';
     log('sys', 'api test failed: ' + err.message);
