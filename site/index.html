@@ -177,8 +177,7 @@
 
     <label>PRESET</label>
     <div class="row" style="margin-top:0">
-      <button class="sm" id="presetGroq">GROQ</button>
-      <button class="sm" id="presetOpenai">OPENAI</button>
+      <button class="sm" id="presetGroq">GROQ (only provider)</button>
     </div>
 
     <label>API KEY</label>
@@ -188,25 +187,21 @@
     <div class="hint">Stored in this browser only. Sent to the endpoint below and nowhere else.</div>
 
     <label>ENDPOINT</label>
-    <input type="text" id="endpoint" placeholder="https://api.groq.com/openai/v1/chat/completions">
+    <input type="text" id="endpoint" readonly>
 
-    <label>MODEL (must accept images)</label>
-    <input type="text" id="model" placeholder="model id">
+    <label>MODEL</label>
+    <select id="model">
+      <option value="qwen/qwen3.8-27b">qwen/qwen3.8-27b — sees the screen and plays</option>
+      <option value="openai/gpt-oss-20b">openai/gpt-oss-20b — text only, faster</option>
+    </select>
 
-    <div class="hint" style="margin-top:12px"><b>EYES (optional)</b> — a second model that only reads the screen.
-      Leave blank and the brain looks at the picture itself.<br>
-      Two setups that work:
-      <br>· <b>one Groq key for both</b> — eyes <code>qwen/qwen3.8-27b</code>,
-      brain <code>openai/gpt-oss-20b</code>. Same endpoint, same key, two models.
-      Press the button below to fill it in.
-      <br>· <b>Gemini as the eyes</b> — <code>gemini-2.0-flash</code> with an
-      <code>AIza…</code> key. Not yet verified here: some providers refuse
-      browser calls with CORS. If TEST AI returns 403, that is what happened,
-      and the Groq setup above avoids it.</div>
-    <input type="text" id="eyesEndpoint" placeholder="eyes endpoint (blank = same as brain)">
-    <input type="text" id="eyesModel" placeholder="eyes model, e.g. gemini-2.0-flash">
-    <input type="password" id="eyesKey" placeholder="eyes key (blank = same as brain)" autocomplete="off">
-    <div class="row"><button class="mi" id="grosplit" type="button">USE GROQ FOR BOTH</button></div>
+    <div class="hint" style="margin-top:12px"><b>EYES (optional)</b> — a second Groq call that only reads
+      the screen, so the model that plays works from text. Same key, same endpoint.</div>
+    <select id="eyesModel">
+      <option value="">none — the brain looks at the picture itself</option>
+      <option value="qwen/qwen3.8-27b">qwen/qwen3.8-27b — a second call reads the screen</option>
+    </select>
+    <div class="hint">Same Groq key and endpoint. Nothing else to fill in.</div>
     <div class="row">
       <button class="sm" id="listmodels">LIST MODELS</button>
     </div>
@@ -352,7 +347,7 @@ function detectProvider(key) {
 
 const DEFAULTS = Object.assign({
   mode: 'local', apikey: '', gap: 5, persona: DEFAULT_PERSONA,
-  eyesEndpoint: '', eyesModel: '', eyesKey: '',      // optional second model that only reads the screen
+  eyesModel: '',                                     // optional second Groq call that only reads the screen
   imgEvery: 3                                        // send the picture on 1 call in N, text otherwise
 }, PRESETS.groq);
 const STORE = 'redexe.v1';
@@ -366,13 +361,11 @@ function useApi() { return S.mode === 'api' && !!S.apikey; }
 
 function paintSettings() {
   $('apikey').value = S.apikey;
-  $('endpoint').value = S.endpoint;
+  $('endpoint').value = PRESETS.groq.endpoint;
   $('model').value = S.model;
   $('gap').value = S.gap;
   $('imgEvery').value = S.imgEvery;
-  $('eyesEndpoint').value = S.eyesEndpoint || '';
   $('eyesModel').value = S.eyesModel || '';
-  $('eyesKey').value = S.eyesKey || '';
   $('persona').value = S.persona;
   document.querySelectorAll('.opt').forEach(o => o.classList.toggle('on', o.dataset.mode === S.mode));
   $('apibtn').textContent = S.apikey ? 'KEY OK' : 'KEY';
@@ -386,9 +379,7 @@ function collect() {
   S.model = $('model').value.trim() || DEFAULTS.model;
   S.gap = Math.max(1, Math.min(60, parseFloat($('gap').value) || 5));
   S.imgEvery = Math.max(1, Math.min(50, parseInt($('imgEvery').value, 10) || 3));
-  S.eyesEndpoint = $('eyesEndpoint').value.trim();
-  S.eyesModel = $('eyesModel').value.trim();
-  S.eyesKey = $('eyesKey').value.trim();
+  S.eyesModel = $('eyesModel').value;
   S.persona = $('persona').value.trim() || DEFAULT_PERSONA;
 }
 function setMode(m) { S.mode = m; persist(); paintSettings(); }
@@ -411,8 +402,11 @@ function keyDetect() {
 $('apikey').addEventListener('input', keyDetect);
 $('apikey').addEventListener('blur', keyDetect);
 
-$('presetGroq').addEventListener('click', () => { $('endpoint').value = PRESETS.groq.endpoint; $('model').value = PRESETS.groq.model; showKeyUrl('groq'); });
-$('presetOpenai').addEventListener('click', () => { $('endpoint').value = PRESETS.openai.endpoint; $('model').value = PRESETS.openai.model; showKeyUrl('openai'); });
+$('presetGroq').addEventListener('click', () => {
+  $('endpoint').value = PRESETS.groq.endpoint;
+  if (!$('model').value) $('model').value = PRESETS.groq.model;
+  showKeyUrl('groq');
+});
 $('save').addEventListener('click', () => {
   const hadKey = !!S.apikey;
   collect();
@@ -713,6 +707,10 @@ async function callModel(userText, frame, withHistory, ov) {
         throw new Error('model "' + S.model + '" is not available on this provider. ' +
           'For Groq use qwen/qwen3.8-27b. Open KEY and pick a model that exists.');
       }
+      if (res.status === 405 || /<html/i.test(body)) {
+        throw new Error('that URL answered like a web page, not an API (405). ' +
+          'The endpoint must be https://api.groq.com/openai/v1/chat/completions');
+      }
       if (res.status === 401) throw new Error('key rejected (401) — paste it again under KEY, then SAVE');
       if (res.status === 400 && useImage && /image|vision|multimodal|content/i.test(body) && !callModel.retried) {
         noVision = true; callModel.retried = true;
@@ -747,7 +745,7 @@ function heardText(heard, frame) {
   return t + '\nReply with the JSON only.';
 }
 
-let lastFrameKey = '', lastButtons = [], unstickTries = 0, tickCount = 0;
+let lastFrameKey = '', lastButtons = [], unstickTries = 0, tickCount = 0, sceneSeenAtLastPicture = '';
 
 /* Hash of the frame, so an unchanged screen does not cost another request. */
 function frameKey(frame) {
@@ -763,46 +761,84 @@ const EYES_PROMPT =
   '(2) menu items visible; (3) whether a text box is open; (4) what the player is standing next to. ' +
   'If the screen is blank or in transition, say so.';
 
-/* What the screen looks like, worked out in the browser for free. This is what
- * he gets on the calls where no picture is sent, so he is never blind. */
+/* What the screen looks like, worked out in the browser for free.
+ * This is what he gets on the turns where no picture is sent, so he is never
+ * blind: a plain description of the left, centre and right of the picture,
+ * whether a text box is open, and whether the scene just changed. */
+const COLOURS = [
+  [250, 250, 250, 'white'], [20, 20, 20, 'black'],
+  [128, 128, 128, 'grey'], [90, 90, 90, 'dark grey'],
+  [60, 110, 60, 'dark green'], [120, 190, 120, 'light green'],
+  [200, 170, 110, 'sand'], [140, 100, 60, 'brown'],
+  [70, 110, 190, 'blue'], [200, 60, 60, 'red'], [220, 200, 80, 'yellow']
+];
+function colourName(r, g, b) {
+  let best = 'mixed', bd = 1e9;
+  for (const [cr, cg, cb, name] of COLOURS) {
+    const d = (r - cr) ** 2 + (g - cg) ** 2 + (b - cb) ** 2;
+    if (d < bd) { bd = d; best = name; }
+  }
+  return best;
+}
+
+let lastScene = '';
+
 function localState() {
   const img = $('preview');
   if (!img || !img.src || img.src.indexOf('data:image') !== 0) return '';
   try {
-    const c = document.createElement('canvas');
-    c.width = 96; c.height = 64;
+    const W = 96, H = 64;
+    const c = document.createElement('canvas'); c.width = W; c.height = H;
     const x = c.getContext('2d');
-    x.drawImage(img, 0, 0, 96, 64);
-    const d = x.getImageData(0, 0, 96, 64).data;
-    let white = 0, dark = 0, bottom = 0, bottomN = 0;
-    const hues = new Set();
-    for (let y = 0; y < 64; y++) for (let i = 0; i < 96; i++) {
-      const p = (y * 96 + i) * 4;
-      const r = d[p], g = d[p + 1], b = d[p + 2];
-      const w = r > 235 && g > 235 && b > 235;
-      if (w) { white++; if (y > 44) bottom++; }
-      if (y > 44) bottomN++;
-      if (r < 40 && g < 40 && b < 40) dark++;
-      hues.add((r >> 5) + ',' + (g >> 5) + ',' + (b >> 5));
+    x.drawImage(img, 0, 0, W, H);
+    const d = x.getImageData(0, 0, W, H).data;
+    const px = (i, j) => { const p = (j * W + i) * 4; return [d[p], d[p + 1], d[p + 2]]; };
+
+    // dominant colour of a block
+    const block = (x0, x1, y0, y1) => {
+      let r = 0, g = 0, b = 0, n = 0;
+      for (let j = y0; j < y1; j += 2) for (let i = x0; i < x1; i += 2) {
+        const q = px(i, j); r += q[0]; g += q[1]; b += q[2]; n++;
+      }
+      return colourName(r / n, g / n, b / n);
+    };
+
+    const left = block(0, W / 3, 0, H);
+    const centre = block(W / 3, 2 * W / 3, 0, H);
+    const right = block(2 * W / 3, W, 0, H);
+
+    // text box: the bottom third is mostly white
+    let bottomWhite = 0, bottomN = 0, dark = 0;
+    for (let j = Math.floor(H * 0.7); j < H; j++) for (let i = 0; i < W; i++) {
+      const q = px(i, j); bottomN++;
+      if (q[0] > 235 && q[1] > 235 && q[2] > 235) bottomWhite++;
     }
-    const n = 96 * 64;
-    const bw = bottom / Math.max(1, bottomN);
+    for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
+      const q = px(i, j); if (q[0] < 40 && q[1] < 40 && q[2] < 40) dark++;
+    }
+    const bw = bottomWhite / Math.max(1, bottomN);
+
+    // scene signature: has the picture changed shape entirely?
+    const sig = [block(0, W / 2, 0, H / 2), block(W / 2, W, 0, H / 2),
+                 block(0, W / 2, H / 2, H), block(W / 2, W, H / 2, H)].join('/');
+    const changed = lastScene && sig !== lastScene;
+    lastScene = sig;
+
     const bits = [];
-    bits.push(bw > 0.35 ? 'a text box is open at the bottom of the screen'
-                        : 'no text box is showing');
-    bits.push(white / n > 0.5 ? 'the screen is mostly white'
-             : dark / n > 0.5 ? 'the screen is mostly black'
-             : 'a game scene is showing');
-    bits.push('about ' + hues.size + ' distinct colours');
-    return bits.join('; ') + '.';
+    bits.push(bw > 0.35 ? 'A text box is open across the bottom of the screen.'
+                        : 'No text box is showing.');
+    bits.push('Left side: mostly ' + left + '. Centre: ' + centre + '. Right side: mostly ' + right + '.');
+    if (dark / (W * H) > 0.6) bits.push('The screen is mostly black.');
+    if (changed) bits.push('The scene looks different from the last one you saw.');
+    return bits.join(' ');
   } catch (e) { return ''; }
 }
 
 async function callEyes(frame) {
   const ov = {
-    endpoint: S.eyesEndpoint || S.endpoint,
+    endpoint: S.endpoint,                   // Groq only: collect() pins this
     model: S.eyesModel || S.model,
-    key: S.eyesKey || S.apikey,
+    key: S.apikey,
     system: EYES_PROMPT
   };
   const r = await callModel('Describe this screen.', frame, false, ov);
@@ -834,8 +870,12 @@ async function thinkApi(heard) {
   // Send it when you speak, when he is stuck, or every Nth call. Otherwise a
   // free local description goes instead.
   tickCount++;
-  const wantPicture = heard.length > 0 || unstickTries > 0 || (tickCount % S.imgEvery === 0);
+  const sceneNow = lastScene;
+  const sceneChanged = sceneNow && sceneNow !== sceneSeenAtLastPicture;
+  const wantPicture = heard.length > 0 || unstickTries > 0 || sceneChanged ||
+                      (tickCount % S.imgEvery === 0);
   const picture = (seen || !wantPicture) ? null : frame;
+  if (picture) sceneSeenAtLastPicture = lastScene;
   let prompt = heardText(heard, frame);
   if (seen) prompt += '\n\nYour eyes report: "' + seen + '"';
   else if (!picture) {
@@ -955,17 +995,6 @@ function setFs(on) {
   // the stage keeps the game's own ratio (10:9 or 3:2); in landscape the CSS above sizes it by height
   if (on) $('log').scrollTop = $('log').scrollHeight;
 }
-$('grosplit').addEventListener('click', () => {
-  const key = $('apikey').value.trim() || S.apikey;
-  $('endpoint').value = PRESETS.groq.endpoint;
-  $('model').value = 'openai/gpt-oss-20b';
-  $('eyesEndpoint').value = PRESETS.groq.endpoint;
-  $('eyesModel').value = PRESETS.groq.model;
-  $('eyesKey').value = '';
-  if (key) $('apikey').value = key;
-  log('sys', 'set up for one Groq key: eyes qwen/qwen3.8-27b, brain openai/gpt-oss-20b. press SAVE.');
-});
-
 async function gameOnly(on) {
   document.body.classList.toggle('gonly', on);
   try {

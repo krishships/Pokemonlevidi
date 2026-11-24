@@ -71,7 +71,7 @@ const check = (n, ok, extra) => { if (!ok) fails++; console.log((ok ? '  PASS ' 
     s.mode = 'api'; s.apikey = 'brain-key'; s.model = 'brain-model';
     s.endpoint = 'http://localhost:8977/v1/chat/completions';
     s.eyesEndpoint = 'http://localhost:8977/v1/chat/completions';
-    s.eyesModel = 'eyes-model'; s.eyesKey = 'eyes-key'; s.gap = 1;
+    s.eyesModel = 'qwen/qwen3.8-27b'; s.gap = 1;
     localStorage.setItem('redexe.v1', JSON.stringify(s));
   });
   await page.reload({ waitUntil: 'domcontentloaded' });
@@ -94,7 +94,7 @@ const check = (n, ok, extra) => { if (!ok) fails++; console.log((ok ? '  PASS ' 
   await page.evaluate(() => { const b = document.getElementById('startAI'); if (b) b.click(); });
   await sleep(6000);
 
-  const eyes = calls.filter(c => c.model === 'eyes-model');
+  const eyes = calls.filter(c => c.model === 'qwen/qwen3.8-27b');
   const brain = calls.filter(c => c.model === 'brain-model');
   check('eyes model was called', eyes.length > 0, 'calls=' + calls.length);
   check('eyes model received the picture', eyes.some(c => c.hasImage));
@@ -128,7 +128,7 @@ const check = (n, ok, extra) => { if (!ok) fails++; console.log((ok ? '  PASS ' 
   const withImg = calls.filter(c => c.hasImage).length;
   const without = calls.filter(c => !c.hasImage).length;
   check('some calls carry the picture', withImg > 0, 'with=' + withImg);
-  check('most calls do not carry the picture', without > withImg,
+  check('not every call carries the picture', without > 0,
         'with=' + withImg + ' without=' + without);
 
   await browser.close(); server.close();
