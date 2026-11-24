@@ -61,8 +61,8 @@ going silent.
 
 ```bash
 bash tools/fetch_base.sh     # clone the pinned base into base/
-bash tools/build_rom.sh      # → dist/heart-and-soul.gba
-python3 tools/romcheck.py dist/heart-and-soul.gba
+bash tools/build_rom.sh      # → dist/emerald.gba
+python3 tools/romcheck.py dist/emerald.gba
 ```
 
 Needs `arm-none-eabi-gcc`, `make`, `python3`, `libpng-dev`.

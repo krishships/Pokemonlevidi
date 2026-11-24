@@ -22,5 +22,5 @@ if [ -z "$ROM" ]; then
     echo "build produced no .gba" >&2
     exit 1
 fi
-cp "$ROM" "$OUT_DIR/heart-and-soul.gba"
-echo "== wrote $OUT_DIR/heart-and-soul.gba ($(stat -c%s "$OUT_DIR/heart-and-soul.gba") bytes)"
+cp "$ROM" "$OUT_DIR/emerald.gba"
+echo "== wrote $OUT_DIR/emerald.gba ($(stat -c%s "$OUT_DIR/emerald.gba") bytes)"

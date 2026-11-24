@@ -36,7 +36,7 @@ jobs:
         run: bash tools/build_rom.sh
 
       - name: Validate ROM header
-        run: python3 tools/romcheck.py dist/heart-and-soul.gba
+        run: python3 tools/romcheck.py dist/emerald.gba
 
       - uses: actions/upload-artifact@v4
         with:
