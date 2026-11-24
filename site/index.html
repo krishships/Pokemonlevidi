@@ -286,6 +286,16 @@ function parseReply(text) {
 }
 function parseReplyInner(text) {
   const raw = String(text || '').replace(/```(?:json)?/gi, '').trim();
+  // a model that answers with a bare array meant the buttons
+  if (!/\{/.test(raw) && /^\s*\[/.test(raw)) {
+    try {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) {
+        const list = arr.filter(x => typeof x === 'string');
+        if (list.length) return { say: '', buttons: expandButtons(list), note: '' };
+      }
+    } catch (e) {}
+  }
   const m = /\{[\s\S]*\}/.exec(raw);
   if (m) {
     try {
@@ -424,6 +434,9 @@ try {
  * A stale URL kept in this browser's storage used to be sent anyway, which is
  * how a POST ended up at a static host and came back "405 Not Allowed". */
 S.endpoint = DEFAULTS.endpoint;
+{ const g = Number(S.gap), n = Number(S.imgEvery);           // storage can hold anything
+  S.gap = Number.isFinite(g) ? Math.max(1, Math.min(30, g)) : 5;
+  S.imgEvery = Number.isFinite(n) ? Math.max(0, Math.min(50, n)) : 3; }
 {
   const fixed = normaliseModel(S.model);
   if (fixed !== S.model) {
@@ -479,7 +492,7 @@ function collect() {
   S.endpoint = $('endpoint').value.trim() || DEFAULTS.endpoint;
   S.model = normaliseModel($('model').value);
   S.gap = Math.max(1, Math.min(60, parseFloat($('gap').value) || 5));
-  S.imgEvery = Math.max(0, Math.min(50, parseInt($('imgEvery').value, 10)));   // 0 = never send it
+  { const n = parseInt($('imgEvery').value, 10); S.imgEvery = Number.isFinite(n) ? Math.max(0, Math.min(50, n)) : 3; }
   S.eyesModel = $('eyesModel').value;
   S.ocr = $('ocr').value;
   S.persona = $('persona').value.trim() || DEFAULT_PERSONA;
@@ -1102,11 +1115,16 @@ const LETTERS = { white: 'W', black: 'K', grey: 'S', 'dark grey': 'D', 'dark gre
                   blue: 'U', sky: 'A', red: 'R', yellow: 'Y' };
 
 function classify(r, g, b) {
-  let best = 'grey', bd = 1e9;
+  let best = 'grey', bd = 1e9, second = 1e9;
   for (const [cr, cg, cb, name] of COLOURS) {
     const d = (r - cr) ** 2 + (g - cg) ** 2 + (b - cb) ** 2;
-    if (d < bd) { bd = d; best = name; }
+    if (d < bd) { second = bd; bd = d; best = name; }
+    else if (d < second) { second = d; }
   }
+  // "mixed" means two colours are nearly equally close, i.e. a blend of two
+  // tiles. A textured tile such as a tree has one clear colour, so it must not
+  // be thrown away: variance is texture, not ambiguity.
+  if (second - bd < Math.max(400, bd * 0.3)) return 'mixed';
   if (bd > 6000) return 'mixed';                              // nothing close: say so
   const luma = 0.299 * r + 0.587 * g + 0.114 * b;
   if (best === 'blue' && luma > 150) best = 'sky';            // sky is not a lake
@@ -1145,15 +1163,7 @@ function screenToText() {
         for (let j = gy * 8; j < gy * 8 + 8; j++)
           for (let i = gx * 8; i < gx * 8 + 8; i++) { const q = px(i, j); r += q[0]; g += q[1]; b += q[2]; n++; }
         r /= n; g /= n; b /= n;
-        // spread of the cell: if no colour dominates, say so rather than invent one
-        let mad = 0;
-        for (let j = gy * 8; j < gy * 8 + 8; j += 2)
-          for (let i = gx * 8; i < gx * 8 + 8; i += 2) {
-            const q = px(i, j);
-            mad += Math.abs(q[0] - r) + Math.abs(q[1] - g) + Math.abs(q[2] - b);
-          }
-        mad /= 48;                              // 16 samples x 3 channels
-        const letter = mad > 20 ? '?' : (LETTERS[classify(r, g, b)] || '?');
+        const letter = LETTERS[classify(r, g, b)] || '?';
         row += letter;
       }
       rows.push(row); grid.push(row.split(''));
@@ -1197,8 +1207,10 @@ function screenToText() {
     // centre from a block, not one pixel
     const centre = grid[GH >> 1][GW >> 1];      // the same cell the grid shows
 
+    // one step is a 16px metatile = 2x2 cells, so the real neighbours are 2
+    // cells away; at 1 cell the "around you" squares were the player's own body
     const around = (dy, dx) => {
-      const gy = 10 + dy, gx = 15 + dx;
+      const gy = 10 + dy * 2, gx = 15 + dx * 2;
       if (gy < 0 || gy >= GH || gx < 0 || gx >= GW) return 'edge';
       return grid[gy][gx];
     };
@@ -1226,8 +1238,9 @@ function screenToText() {
       (exits.length ? ' Exits: ' + exits.join(' ') + '.' : ' No exits on any edge.') +
       ' You are the figure at the centre of the grid.',
       near,
-      'Grid 30x20, one letter per 8x8 tile, top row first. A number after a letter is a ' +
-      'repeat count (T30 = 30 tree tiles); xN after a row means the row repeats. ' +
+      'Grid 30x20, one letter per 8x8 pixel cell, rows separated by /. A number after a ' +
+      'letter is a repeat count (G30 = 30 grass cells); a letter with no number is one cell; ' +
+      'xN after a row means that row repeats N times. One step = 2 cells. ' +
       'Letters here: ' + usedLetters, 
       enc.join('/')
     ].join('\n');
@@ -1552,6 +1565,17 @@ trackKeyboard();
   };
   window.addEventListener('pointerdown', go, { once: true, passive: true });
   window.addEventListener('touchend', go, { once: true, passive: true });
+})();
+
+// say early if this browser will not keep anything
+(function checkStorage() {
+  const bad = () => {
+    try { localStorage.setItem('redexe.probe', '1'); localStorage.removeItem('redexe.probe'); }
+    catch (e) { return true; }
+    return false;
+  };
+  if (bad()) setTimeout(() => log('sys', 'this browser is not letting the page save anything ' +
+    '(private mode?). the game will run, but the ROM, the save and your key will be gone on reload.'), 1200);
 })();
 
 (async function autoLoadRom() {

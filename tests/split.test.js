@@ -82,7 +82,24 @@ const check = (n, ok, extra) => { if (!ok) fails++; console.log((ok ? '  PASS ' 
     window.__shot = 0;
     window.EJS_emulator = {
       gameManager: {
-        screenshot: function () { window.__shot++; const a = new Uint8Array(window.__png); a[a.length - 2] = window.__shot & 0xFF; return Promise.resolve(a); },
+        screenshot: function () {
+          window.__shot++;
+          if (!window.__frames) {
+            window.__frames = [];
+            for (let k = 0; k < 4; k++) {
+              const c = document.createElement('canvas'); c.width = 240; c.height = 160;
+              const x = c.getContext('2d');
+              x.fillStyle = ['#78c850', '#a0d878', '#f8f8a0', '#98c8f8'][k];
+              x.fillRect(0, 0, 240, 160);
+              x.fillStyle = '#307830'; x.fillRect(0, 0, 240, 32);
+              x.fillStyle = '#e0c080'; x.fillRect(96, 32, 16, 128);
+              x.fillStyle = '#101010'; x.fillRect(40 + k * 8, 60, 24, 32);
+              window.__frames.push(c.toDataURL('image/png'));
+            }
+          }
+          const u = window.__frames[window.__shot % 4];
+          return fetch(u).then(r => r.arrayBuffer()).then(b => new Uint8Array(b));
+        },
         simulateInput: function () {}, getFrameNum: function () { return 1; },
         getState: function () { return new Uint8Array(8); }, saveSaveFiles: function () {}
       }
@@ -103,7 +120,24 @@ const check = (n, ok, extra) => { if (!ok) fails++; console.log((ok ? '  PASS ' 
   await page.evaluate(() => {
     window.__png = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='), c => c.charCodeAt(0));
     window.__shot = 0;
-    window.EJS_emulator = { gameManager: { screenshot: function () { window.__shot++; const a = new Uint8Array(window.__png); a[a.length - 2] = window.__shot & 0xFF; return Promise.resolve(a); }, simulateInput: function () {}, getFrameNum: function () { return 1; }, getState: function () { return new Uint8Array(8); }, saveSaveFiles: function () {} } };
+    window.EJS_emulator = { gameManager: { screenshot: function () {
+          window.__shot++;
+          if (!window.__frames) {
+            window.__frames = [];
+            for (let k = 0; k < 4; k++) {
+              const c = document.createElement('canvas'); c.width = 240; c.height = 160;
+              const x = c.getContext('2d');
+              x.fillStyle = ['#78c850', '#a0d878', '#f8f8a0', '#98c8f8'][k];
+              x.fillRect(0, 0, 240, 160);
+              x.fillStyle = '#307830'; x.fillRect(0, 0, 240, 32);
+              x.fillStyle = '#e0c080'; x.fillRect(96, 32, 16, 128);
+              x.fillStyle = '#101010'; x.fillRect(40 + k * 8, 60, 24, 32);
+              window.__frames.push(c.toDataURL('image/png'));
+            }
+          }
+          const u = window.__frames[window.__shot % 4];
+          return fetch(u).then(r => r.arrayBuffer()).then(b => new Uint8Array(b));
+        }, simulateInput: function () {}, getFrameNum: function () { return 1; }, getState: function () { return new Uint8Array(8); }, saveSaveFiles: function () {} } };
   });
 
   // boot the emulator stub the same way the page really boots: a file on #rom
@@ -141,7 +175,24 @@ const check = (n, ok, extra) => { if (!ok) fails++; console.log((ok ? '  PASS ' 
   await page.evaluate(() => {
     window.__png = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='), c => c.charCodeAt(0));
     window.__shot = 0;
-    window.EJS_emulator = { gameManager: { screenshot: function () { window.__shot++; const a = new Uint8Array(window.__png); a[a.length - 2] = window.__shot & 0xFF; return Promise.resolve(a); }, simulateInput: function () {}, getFrameNum: function () { return 1; }, getState: function () { return new Uint8Array(8); }, saveSaveFiles: function () {} } };
+    window.EJS_emulator = { gameManager: { screenshot: function () {
+          window.__shot++;
+          if (!window.__frames) {
+            window.__frames = [];
+            for (let k = 0; k < 4; k++) {
+              const c = document.createElement('canvas'); c.width = 240; c.height = 160;
+              const x = c.getContext('2d');
+              x.fillStyle = ['#78c850', '#a0d878', '#f8f8a0', '#98c8f8'][k];
+              x.fillRect(0, 0, 240, 160);
+              x.fillStyle = '#307830'; x.fillRect(0, 0, 240, 32);
+              x.fillStyle = '#e0c080'; x.fillRect(96, 32, 16, 128);
+              x.fillStyle = '#101010'; x.fillRect(40 + k * 8, 60, 24, 32);
+              window.__frames.push(c.toDataURL('image/png'));
+            }
+          }
+          const u = window.__frames[window.__shot % 4];
+          return fetch(u).then(r => r.arrayBuffer()).then(b => new Uint8Array(b));
+        }, simulateInput: function () {}, getFrameNum: function () { return 1; }, getState: function () { return new Uint8Array(8); }, saveSaveFiles: function () {} } };
     const input = document.getElementById('rom');
     const file = new File([new Uint8Array([1, 2, 3, 4])], 'test.gbc', { type: 'application/octet-stream' });
     const dt = new DataTransfer(); dt.items.add(file);
@@ -179,7 +230,7 @@ const check = (n, ok, extra) => { if (!ok) fails++; console.log((ok ? '  PASS ' 
         'with=' + withImg + ' without=' + without);
   const textOnly = calls.filter(c => !c.hasImage);
   check('a text-only call carries the decoded grid',
-        textOnly.some(c => /Grid 30x20, one letter per 8x8 tile/.test(c.text)),
+        textOnly.some(c => /Grid 30x20, one letter per 8x8 pixel cell/.test(c.text)),
         'checked ' + textOnly.length + ' text calls');
   check('a text-only call says what is around the player',
         textOnly.some(c => /Around you: up [A-Za-z?]+, down [A-Za-z?]+, left [A-Za-z?]+, right [A-Za-z?]+/.test(c.text)));
