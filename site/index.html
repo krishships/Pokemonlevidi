@@ -461,7 +461,17 @@ function keyDetect() {
   const preset = PRESETS[p];
   if (!preset) return;
   $('endpoint').value = preset.endpoint;
-  $('model').value = preset.model;
+  if (!$('model').value || normaliseModel($('model').value) !== $('model').value) {
+    $('model').value = preset.model;
+  }
+  // one paste is the whole setup: API brain on, settings saved, nothing to press
+  S.apikey = k;
+  S.mode = 'api';
+  S.endpoint = preset.endpoint;
+  S.model = normaliseModel($('model').value);
+  persist();
+  paintSettings();
+  if (k.length > 12) logOnce('key saved · brain: api · model ' + S.model + ' — press WAKE RED');
 }
 $('apikey').addEventListener('input', keyDetect);
 $('apikey').addEventListener('blur', keyDetect);
@@ -863,6 +873,30 @@ function colourName(r, g, b) {
 }
 
 let lastScene = '';
+
+/* A poor man's map, because the browser cannot read RAM. Every tile grid the
+ * page has seen is remembered with the action that was taken from it and
+ * whether the screen changed. Two things fall out of that for free:
+ *   - an action that did nothing from this exact grid is not tried again
+ *   - a grid where an action DID change the screen is a door, and is preferred
+ * It is small, it is cheap, and it survives for the session. */
+const seenGrids = new Map();       // grid signature -> { tried: {UP:1,...}, worked: {UP:1,...} }
+function gridKey(grid) { return grid.join('/'); }
+function remember(gridSig, action, changed) {
+  if (!gridSig || !action) return;
+  let rec = seenGrids.get(gridSig);
+  if (!rec) { rec = { tried: {}, worked: {} }; seenGrids.set(gridSig, rec); }
+  rec.tried[action] = 1;
+  if (changed) rec.worked[action] = 1;
+}
+function suggestAction(gridSig, fallback) {
+  const rec = gridSig && seenGrids.get(gridSig);
+  if (!rec) return fallback;
+  if (rec.worked[Object.keys(rec.worked)[0]]) return Object.keys(rec.worked)[0];
+  const order = ['UP', 'RIGHT', 'DOWN', 'LEFT'];
+  const untried = order.find(a => !rec.tried[a]);
+  return untried || fallback;
+}
 let prevGrid = null;
 
 /* a coarse tile map of the picture: 12 x 8 letters, plus whether the view scrolled */
@@ -1028,6 +1062,21 @@ async function callEyes(frame) {
   return String(r.text || '').replace(/\s+/g, ' ').slice(0, 400);
 }
 
+/* The 12x8 grid of the current frame, as a signature string. Cheap: one small
+ * canvas draw. Used by the map memory below. */
+function gridSignature() {
+  const img = $('preview');
+  if (!img || !img.src || img.src.indexOf('data:image') !== 0) return '';
+  try {
+    const W = 96, H = 64;
+    const c = document.createElement('canvas'); c.width = W; c.height = H;
+    const x = c.getContext('2d'); x.drawImage(img, 0, 0, W, H);
+    return gridOf(x.getImageData(0, 0, W, H).data, W, H).join('/');
+  } catch (e) { return ''; }
+}
+
+let pendingMove = null;          // { grid, action } from the last decision
+
 async function thinkApi(heard) {
   const frame = await look();
   const key = frameKey(frame);
@@ -1072,8 +1121,26 @@ async function thinkApi(heard) {
   // memory between pictures: his own notes, last moves, and whether they did anything
   if (memo.length) prompt += '\n\nYour notes so far (oldest first): ' + memo.join(' | ');
   if (lastMoves) prompt += '\nYour last moves: ' + lastMoves + (stuck >= 1 ? ' (the screen did not change after them).' : ' (the screen changed).');
+  const gridNow = gridSignature();
+  if (pendingMove && gridNow) {
+    remember(pendingMove.grid, pendingMove.action, gridNow !== pendingMove.grid);
+    pendingMove = null;
+  }
+
   const r = await callModel(prompt, picture, true);
   const act = parseReply(r.text);
+
+  // if the model picks a direction that has already done nothing from this exact
+  // grid, take one it has not tried yet instead
+  const DIRS = ['UP', 'DOWN', 'LEFT', 'RIGHT'];
+  if (act.buttons && act.buttons.length && DIRS.includes(act.buttons[0]) && gridNow) {
+    const better = suggestAction(gridNow, act.buttons[0]);
+    if (better && better !== act.buttons[0]) {
+      log('sys', 'map memory: ' + act.buttons[0] + ' did nothing here before, trying ' + better);
+      act.buttons[0] = better;
+    }
+  }
+  if (act.buttons && act.buttons.length) pendingMove = { grid: gridNow, action: act.buttons[0] };
   lastApi = 'OK ' + Math.round(performance.now() - t0) + ' MS';
   history.push({ role: 'user', content: heard.length ? 'Dev: ' + heard.join(' / ') : 'Dev is silent.' },
                { role: 'assistant', content: JSON.stringify(act) });
