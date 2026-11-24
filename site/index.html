@@ -382,7 +382,7 @@ function normaliseModel(m) {
 }
 
 const DEFAULTS = Object.assign({
-  mode: 'local', apikey: '', ocr: 'on', gap: 5, persona: DEFAULT_PERSONA,
+  mode: 'local', apikey: '', ocr: 'off', gap: 5, persona: DEFAULT_PERSONA,
   eyesModel: '',                                     // optional second Groq call that only reads the screen
   imgEvery: 3                                        // send the picture on 1 call in N, text otherwise
 }, PRESETS.groq);
@@ -530,6 +530,12 @@ function addLine(who, text) {
   el.querySelector('.body').textContent = text;
   const box = $('log');
   box.insertBefore(el, box.querySelector('.arrow'));
+  // keep the DOM bounded: the array was capped, the nodes were not
+  while (box.querySelectorAll('.msg').length > 80) {
+    const old = box.querySelector('.msg');
+    if (!old) break;
+    old.remove();
+  }
   box.scrollTop = box.scrollHeight;
 }
 
@@ -645,6 +651,7 @@ function startRom(file, restored) {
   window.EJS_core = isGba ? 'mgba' : 'gambatte';
   window.EJS_gameUrl = URL.createObjectURL(file);
   window.EJS_gameName = file.name;
+  window.EJS_disableAutoLang = true;
   window.EJS_pathtodata = 'https://cdn.emulatorjs.org/stable/data/';
   window.EJS_startOnLoaded = true;
   window.EJS_onGameStart = () => adopt();
@@ -710,7 +717,7 @@ async function runButtons(list) {
   // The action came from a live tick, so press it. Do not re-check `awake` here:
   // that flag is the loop's business, and re-checking it silently dropped every
   // button whenever it happened to be false for a moment.
-  for (const b of list || []) await press(b);
+  for (const b of list || []) { if (!awake) break; await press(b); }
 }
 
 /* ================================================================ eyes */
@@ -735,7 +742,9 @@ function frameFromBytes(bytes) {
         let h = 7;
         for (let i = 0; i < d.length; i += 4) h = (h * 31 + (d[i] >> 3) + (d[i + 1] >> 3) * 3 + (d[i + 2] >> 3) * 7) | 0;
         URL.revokeObjectURL(url);
-        resolve({ url: c.toDataURL('image/png'), jpeg: c.toDataURL('image/jpeg', 0.6), hash: h });
+        // one encode only: PNG is ~4.6x smaller than JPEG on 15-bit pixel art
+        const png = c.toDataURL('image/png');
+        resolve({ url: png, jpeg: png, hash: h });
       } catch (err) { URL.revokeObjectURL(url); reject(err); }
     };
     img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('could not decode frame')); };
@@ -894,14 +903,44 @@ let lastScene = '';
  *   - an action that did nothing from this exact grid is not tried again
  *   - a grid where an action DID change the screen is a door, and is preferred
  * It is small, it is cheap, and it survives for the session. */
-const seenGrids = new Map();       // grid signature -> { tried: {UP:1,...}, worked: {UP:1,...} }
+const seenGrids = new Map();       // grid signature -> { tried, worked, to, visits }
 function gridKey(grid) { return grid.join('/'); }
-function remember(gridSig, action, changed) {
+function remember(gridSig, action, changed, toSig) {
   if (!gridSig || !action) return;
   let rec = seenGrids.get(gridSig);
-  if (!rec) { rec = { tried: {}, worked: {} }; seenGrids.set(gridSig, rec); }
+  if (!rec) { rec = { tried: {}, worked: {}, to: {}, visits: 0 }; seenGrids.set(gridSig, rec); }
   rec.tried[action] = 1;
-  if (changed) rec.worked[action] = 1;
+  if (changed) {
+    rec.worked[action] = 1;
+    if (toSig && toSig !== gridSig) rec.to[action] = toSig;   // where that move leads
+  }
+  if (toSig) {
+    const n = seenGrids.get(toSig) || { tried: {}, worked: {}, to: {}, visits: 0 };
+    n.visits = (n.visits || 0) + 1;
+    seenGrids.set(toSig, n);
+  }
+}
+
+/* A one-step planner over the graph we have learnt, because the browser has no
+ * coordinates. Prefer a move that leads to the least-visited screen (explore),
+ * then a move never tried here, then whatever the model said. */
+function planAction(gridSig, fallback) {
+  const rec = gridSig && seenGrids.get(gridSig);
+  if (!rec) return { action: fallback, why: '' };
+  const order = ['UP', 'RIGHT', 'DOWN', 'LEFT'];
+  const leads = order.filter(a => rec.to[a]);
+  if (leads.length) {
+    leads.sort((a, b) => {
+      const na = seenGrids.get(rec.to[a]) || { visits: 0 };
+      const nb = seenGrids.get(rec.to[b]) || { visits: 0 };
+      return (na.visits || 0) - (nb.visits || 0);
+    });
+    const a = leads[0];
+    return { action: a, why: a + ' led somewhere new before' };
+  }
+  const untried = order.find(a => !rec.tried[a]);
+  if (untried) return { action: untried, why: untried + ' is untried from this view' };
+  return { action: fallback, why: '' };
 }
 function suggestAction(gridSig, fallback) {
   const rec = gridSig && seenGrids.get(gridSig);
@@ -1190,9 +1229,19 @@ async function thinkApi(heard) {
                       (tickCount % S.imgEvery === 0));
   const picture = (seen || !wantPicture) ? null : (lastJpeg || frame);
   if (picture) sceneSeenAtLastPicture = lastScene;
+  const gridNow = gridSignature();
   let prompt = heardText(heard, frame);
-  const decoded = screenToText();
+  const decoded = wantPicture ? '' : screenToText();   // no point paying for both
   if (decoded) prompt += '\n\nWhat the screen decodes to:\n' + decoded;
+
+  // what the learned map already knows about standing exactly here
+  const rec = gridNow && seenGrids.get(gridNow);
+  if (rec) {
+    const known = ['UP', 'DOWN', 'LEFT', 'RIGHT'].map(a =>
+      a + '=' + (rec.to[a] ? 'went somewhere new' : rec.tried[a] ? 'nothing happened' : 'untried'));
+    prompt += '\n\nFrom this exact view you have already tried: ' + known.join(', ') +
+              '. Do not repeat a direction that did nothing.';
+  }
   if (stuckCount >= 3) {
     prompt += '\n\nYou have tried ' + stuckCount + ' times and the screen has not changed once. ' +
               'Whatever you are doing is not working. Do something clearly different this turn.';
@@ -1208,10 +1257,9 @@ async function thinkApi(heard) {
   // memory between pictures: his own notes, last moves, and whether they did anything
   if (memo.length) prompt += '\n\nYour notes so far (oldest first): ' + memo.join(' | ');
   if (lastMoves) prompt += '\nYour last moves: ' + lastMoves + (stuck >= 1 ? ' (the screen did not change after them).' : ' (the screen changed).');
-  const gridNow = gridSignature();
   if (pendingMove && gridNow) {
     const changed = gridNow !== pendingMove.grid;
-    remember(pendingMove.grid, pendingMove.action, changed);
+    remember(pendingMove.grid, pendingMove.action, changed, changed ? gridNow : '');
     if (changed) { stuckCount = 0; } else { stuckCount++; bestStuck = Math.max(bestStuck, stuckCount); }
     pendingMove = null;
   }
@@ -1219,6 +1267,8 @@ async function thinkApi(heard) {
     logOnce('stuck for ' + stuckCount + ' turns — forcing a look and a different plan');
   }
 
+  lastApi = 'WAITING…';
+  paintStatus();
   const r = await callModel(prompt, picture, true);
   const act = parseReply(r.text);
 
@@ -1226,10 +1276,10 @@ async function thinkApi(heard) {
   // grid, take one it has not tried yet instead
   const DIRS = ['UP', 'DOWN', 'LEFT', 'RIGHT'];
   if (act.buttons && act.buttons.length && DIRS.includes(act.buttons[0]) && gridNow) {
-    const better = suggestAction(gridNow, act.buttons[0]);
-    if (better && better !== act.buttons[0]) {
-      logOnce('map memory: ' + act.buttons[0] + ' did nothing here before, trying ' + better);
-      act.buttons[0] = better;
+    const plan = planAction(gridNow, act.buttons[0]);
+    if (plan.action && plan.action !== act.buttons[0]) {
+      if (stuckCount >= 2) logOnce('stuck here — the map says try ' + plan.action + ' instead');
+      act.buttons[0] = plan.action;
     }
   }
   if (act.buttons && act.buttons.length) pendingMove = { grid: gridNow, action: act.buttons[0] };
@@ -1313,6 +1363,7 @@ async function loop() {
 }
 
 function wake() {
+  slow = 0;                             // a fresh start is not still being punished
   if (!emu) adopt();                    // the page may have been reloaded under us
   if (!emu) { log('sys', 'load a ROM first'); return false; }
   if (awake) return true;
@@ -1328,6 +1379,7 @@ function rest() {
   paintStatus();
 }
 $('forget').addEventListener('click', () => {
+  seenGrids.clear(); prevGrid = null; stuckCount = 0; bestStuck = 0; tickCount = 0;
   history = []; memo = []; lastMoves = ''; lastFrameKey = ''; unstickTries = 0; lastScene = ''; sceneSeenAtLastPicture = '';
   persistChat();
   log('sys', 'red forgets everything he learned. the world is new to him again.');
@@ -1424,7 +1476,8 @@ async function bootRestore() {
 
 /* fetch the OCR engine in the background at startup, so the first dialogue box
  * does not wait for it, and a failure only turns OCR off. */
-setTimeout(() => { if (S.ocr === 'on') loadOcr().catch(() => {}); }, 4000);
+// no prefetch: OCR is opt-in, because it is ~15 MB and the free decoder
+// already gives the model a text read of the screen
 
 /* =========================================================== test the AI */
 $('testai').addEventListener('click', async () => {
