@@ -39,10 +39,18 @@
   #eyetext{font-size:8px;line-height:2;white-space:pre-line}
 
   .menu{margin-top:10px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 8px;padding:8px 10px}
+  .mi,.sm,summary,#send,.opt{touch-action:manipulation}
+  #stage,#preview,.canvas,.mi{touch-action:none;user-select:none;-webkit-touch-callout:none}
+  html,body{overscroll-behavior:none}
+  .mi,.sm,summary,#send,.opt{touch-action:manipulation}
+  #stage,#preview,.canvas{touch-action:none;user-select:none;-webkit-touch-callout:none}
+  html,body{overscroll-behavior:none}
   .mi{font:inherit;font-size:10px;text-align:left;background:none;border:0;color:var(--ink);cursor:pointer;
       padding:9px 4px;min-height:40px}
   .mi::before{content:'\25B6';visibility:hidden;margin-right:6px}
   .mi:hover::before,.mi:focus-visible::before,.mi:active::before{visibility:visible}
+  .sm:focus-visible,summary:focus-visible,.opt:focus-visible,select:focus-visible,
+  #eyesModel:focus-visible,#ocr:focus-visible{outline:3px solid var(--dark);outline-offset:2px}
   .mi:focus-visible{outline:3px solid var(--dark);outline-offset:-2px}
 
   #log{margin-top:10px;height:210px;overflow-y:auto;position:relative}
@@ -70,6 +78,8 @@
   details[open] summary::before{content:'\25BC '}
   .panel{margin-top:6px}
   label{display:block;font-size:8px;margin:14px 0 6px}
+  /* iOS zooms the page when a field under 16px takes focus and never zooms back */
+  @media (pointer:coarse){ input,select,textarea{font-size:16px} }
   select{width:100%;max-width:100%;box-sizing:border-box;min-height:40px;font:inherit;
          font-size:10px;background:var(--paper);color:var(--ink);border:2px solid var(--ink);padding:6px}
   input[type=text],input[type=password],textarea{width:100%;font:inherit;font-size:10px;color:var(--ink);
@@ -88,7 +98,9 @@
   /* nobody plays this by hand: the AI presses the buttons */
   .ejs_virtualGamepad_parent{display:none!important}
   /* FULL SCREEN: the whole app fills the phone. Game on top, chat fills the rest, input pinned at the bottom. */
-  body.fs{max-width:none;height:100vh;height:100dvh;margin:0;overflow:hidden;display:grid;gap:8px;
+  /* The keyboard is not part of 100dvh. --kb is set from visualViewport in the
+ * script, so the chat row shrinks instead of disappearing under the keys. */
+body.fs{height:calc(100dvh - var(--kb, 0px));max-width:none;height:100vh;height:100dvh;margin:0;overflow:hidden;display:grid;gap:8px;
     padding:max(6px,env(safe-area-inset-top)) max(6px,env(safe-area-inset-right)) max(6px,env(safe-area-inset-bottom)) max(6px,env(safe-area-inset-left));
     grid-template-columns:minmax(0,1fr);grid-template-rows:auto auto minmax(0,1fr) auto;
     grid-template-areas:"stage" "bar" "log" "say"}
@@ -108,7 +120,8 @@
   /* a small way out, tap the picture */
   #exitg{display:none;position:fixed;top:10px;right:10px;z-index:100000;
          padding:10px 14px;font:inherit;border-radius:999px;border:2px solid #fff;
-         background:rgba(0,0,0,.72);color:#fff;opacity:.92;font-size:13px}
+         background:rgba(0,0,0,.72);color:#fff;opacity:.92;font-size:13px;
+        top:calc(10px + env(safe-area-inset-top));right:calc(10px + env(safe-area-inset-right))}
   body.gonly #exitg{display:block!important}
   body.fs #stage{grid-area:stage;margin:0;width:100%;justify-self:center}
   body.fs .menu{grid-area:bar;margin:0;display:flex;gap:0 14px;padding:2px 10px;justify-content:space-between}
@@ -117,7 +130,9 @@
   body.fs #log{grid-area:log;margin:0;height:auto;min-height:0}
   body.fs #say{grid-area:say;margin:0}
   @media (orientation:landscape){
-    body.fs{grid-template-columns:auto minmax(0,1fr);grid-template-rows:auto minmax(0,1fr) auto;
+    /* The keyboard is not part of 100dvh. --kb is set from visualViewport in the
+ * script, so the chat row shrinks instead of disappearing under the keys. */
+body.fs{height:calc(100dvh - var(--kb, 0px));grid-template-columns:auto minmax(0,1fr);grid-template-rows:auto minmax(0,1fr) auto;
       grid-template-areas:"stage bar" "stage log" "stage say"}
     body.fs #stage{height:calc(100dvh - 16px);width:auto;aspect-ratio:10/9}
   }
@@ -163,7 +178,7 @@
 <div id="log" class="box" aria-live="polite"><span class="arrow" aria-hidden="true">&#9660;</span></div>
 
 <div id="say">
-  <input id="whisper" type="text" placeholder="talk to red..." maxlength="240" autocomplete="off" aria-label="Say something to Red">
+  <input id="whisper" autocapitalize="none" autocorrect="off" spellcheck="false" type="text" placeholder="talk to red..." maxlength="240" autocomplete="off" aria-label="Say something to Red">
   <button id="send">SAY</button>
 </div>
 
@@ -173,8 +188,8 @@
 
     <label>BRAIN</label>
     <div class="switch">
-      <div class="opt on" data-mode="local" role="button" tabindex="0">LOCAL (no key)</div>
-      <div class="opt" data-mode="api" role="button" tabindex="0">API (my key)</div>
+      <div class="opt on" data-mode="local" role="button" tabindex="0" aria-pressed="true">LOCAL (no key)</div>
+      <div class="opt" data-mode="api" role="button" tabindex="0" aria-pressed="false">API (my key)</div>
     </div>
     <div class="hint">API brain: Red looks at the screen and chooses his own moves. Local brain: keywords and random walking, no key needed.</div>
 
@@ -183,16 +198,16 @@
       <button class="sm" id="presetGroq">GROQ (only provider)</button>
     </div>
 
-    <label>API KEY</label>
+    <label for="apikey">API KEY</label>
     <input type="password" id="apikey" placeholder="paste your key" autocomplete="off">
     <div class="hint" id="keyhint"></div>
     <div class="hint" id="keyurl"></div>
     <div class="hint">Stored in this browser only. Sent to the endpoint below and nowhere else.</div>
 
-    <label>ENDPOINT</label>
+    <label for="endpoint">ENDPOINT</label>
     <input type="text" id="endpoint" readonly>
 
-    <label>MODEL</label>
+    <label for="model">MODEL</label>
     <input type="text" id="model" list="modelList" autocomplete="off" spellcheck="false">
     <datalist id="modelList">
       <option value="qwen/qwen3.8-27b">sees the screen and plays</option>
@@ -211,14 +226,14 @@
       <button class="sm" id="listmodels">LIST MODELS</button>
     </div>
 
-    <label>READ SCREEN TEXT (OCR)</label>
+    <label for="ocr">READ SCREEN TEXT (OCR)</label>
     <select id="ocr">
       <option value="off">off</option>
       <option value="on">on — free text reading in your browser (loads tesseract.js)</option>
     </select>
     <div class="hint">Reads dialogue and menus from the screen so a text-only model can follow the story without a picture.</div>
 
-    <label>PICTURE EVERY N CALLS</label>
+    <label for="imgEvery">PICTURE EVERY N CALLS</label>
     <input type="text" id="imgEvery" inputmode="numeric" placeholder="3">
     <div class="hint">Vision tokens are what runs you into 429. Every turn he already gets the
       screen decoded to text — a 24x16 letter grid, the borders, whether a text box is open. The
@@ -447,6 +462,9 @@ function paintSettings() {
   $('persona').value = S.persona;
   document.querySelectorAll('.opt').forEach(o => o.classList.toggle('on', o.dataset.mode === S.mode));
   $('apibtn').textContent = S.apikey ? 'KEY OK' : 'KEY';
+  document.querySelectorAll('.switch .opt').forEach(el => {
+    el.setAttribute('aria-pressed', String((el.dataset.mode === 'api') === useApi()));
+  });
   $('modeLabel').textContent = S.mode === 'api' ? (S.apikey ? 'api brain' : 'api: no key') : 'local brain';
   paintStatus();
 }
@@ -937,28 +955,39 @@ function remember(gridSig, action, changed, toSig) {
     n.visits = (n.visits || 0) + 1;
     seenGrids.set(toSig, n);
   }
+  // keep the map bounded: a long session must not grow it forever
+  if (seenGrids.size > 400) {
+    const first = seenGrids.keys().next().value;
+    if (first !== gridSig) seenGrids.delete(first);
+  }
 }
 
 /* A one-step planner over the graph we have learnt, because the browser has no
  * coordinates. Prefer a move that leads to the least-visited screen (explore),
  * then a move never tried here, then whatever the model said. */
-function planAction(gridSig, fallback) {
+/* Only step in when the model's own choice is known to be useless from exactly
+ * this view. An untried direction is NOT a reason to override — that made the
+ * planner replace the model on 97.5% of turns, always with UP. */
+function planAction(gridSig, wanted) {
   const rec = gridSig && seenGrids.get(gridSig);
-  if (!rec) return { action: fallback, why: '' };
+  if (!rec) return { action: wanted, why: '' };
+  if (!wanted) return { action: wanted, why: '' };
+  const failed = rec.tried[wanted] && !rec.to[wanted];
+  if (!failed) return { action: wanted, why: '' };          // the model's move is not known to fail
+
   const order = ['UP', 'RIGHT', 'DOWN', 'LEFT'];
-  const leads = order.filter(a => rec.to[a]);
+  const leads = order.filter(a => rec.to[a] && a !== wanted);
   if (leads.length) {
     leads.sort((a, b) => {
       const na = seenGrids.get(rec.to[a]) || { visits: 0 };
       const nb = seenGrids.get(rec.to[b]) || { visits: 0 };
       return (na.visits || 0) - (nb.visits || 0);
     });
-    const a = leads[0];
-    return { action: a, why: a + ' led somewhere new before' };
+    return { action: leads[0], why: leads[0] + ' led somewhere before' };
   }
   const untried = order.find(a => !rec.tried[a]);
-  if (untried) return { action: untried, why: untried + ' is untried from this view' };
-  return { action: fallback, why: '' };
+  if (untried) return { action: untried, why: untried + ' is untried here' };
+  return { action: wanted, why: '' };
 }
 let prevGrid = null;
 
@@ -1243,6 +1272,7 @@ async function thinkApi(heard) {
     unstickTries++;
     lastApi = 'NO CHANGE (' + unstickTries + ')';
     if (unstickTries >= 3) { unstickTries = 0; lastFrameKey = ''; return; }  // 3 free tries, then ask again
+    pendingMove = null;                 // the shortcut presses buttons: never pair it
     const turn = ['UP', 'RIGHT', 'DOWN', 'LEFT'][unstickTries % 4];
     await runButtons([turn, turn]);
     return;
@@ -1488,6 +1518,42 @@ async function bootRestore() {
     if (r && r.blob) { log('sys', 'found your ROM from last time: ' + r.name); startRom(new File([r.blob], r.name), true); }
   } catch (e) {}
 }
+// iOS may delete site storage after seven days of no use unless it is persisted
+try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
+
+// iOS suspends any audio started without a gesture. Resume on the first touch.
+// Track the visual viewport so the chat row can shrink when the keyboard opens.
+function trackKeyboard() {
+  const vv = window.visualViewport;
+  if (!vv) return;
+  const set = () => {
+    const kb = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+    document.documentElement.style.setProperty('--kb', kb + 'px');
+  };
+  vv.addEventListener('resize', set);
+  vv.addEventListener('scroll', set);
+  set();
+}
+trackKeyboard();
+
+(function unlockAudio() {
+  const go = () => {
+    try {
+      const ctxs = [window.AudioContext, window.webkitAudioContext].filter(Boolean);
+      const ac = window.__ac || null;
+      if (ac && ac.state === 'suspended') ac.resume();
+      const gm = emu && emu.gameManager;
+      if (gm && gm.Module && gm.Module.audioContext && gm.Module.audioContext.state === 'suspended') {
+        gm.Module.audioContext.resume();
+      }
+    } catch (e) {}
+    window.removeEventListener('pointerdown', go);
+    window.removeEventListener('touchend', go);
+  };
+  window.addEventListener('pointerdown', go, { once: true, passive: true });
+  window.addEventListener('touchend', go, { once: true, passive: true });
+})();
+
 (async function autoLoadRom() {
   await bootRestore();
   if (loaderAdded) return;
