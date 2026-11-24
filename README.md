@@ -5,52 +5,28 @@ plus a page that runs the ROM and puts an AI in the driver's seat. A cartridge h
 no network, so the brain lives in the browser: it reads the screen, presses the
 buttons, and talks to you. You are Dev, an NPC he can hear.
 
-## Getting the ROM
+## Bring your own ROM
 
-**You do not need to own or supply a ROM.** `pokeemerald` is a decompilation:
-it compiles its own image from source. CI does that on every push to `main`,
-and the same build works locally with no base ROM.
+This repo does **not** build or ship a ROM. You supply one: a Pokémon Emerald
+`.gba` you own, dropped into the page with **LOAD ROM**.
 
-### The newest build
+If you put `emerald.gba` next to `site/index.html` (or in `site/roms/`), the
+page finds and loads it automatically. `.gitignore` keeps ROMs out of git, so
+a ROM never lands in the repository by accident.
 
-1. Open **Actions → CI** on this repo
-2. Click the newest green run (or **Run workflow** to build one right now)
-3. Scroll to **Artifacts** and download **`emerald-gba`**
-4. Unzip it — you get `emerald.gba` (16 MB, title `POKEMON EMER`, code `BPEE`)
-
-The run summary prints the commit, size and **sha256** of the ROM, so you can
-tell two builds apart instead of guessing by filename.
-
-Artifacts are kept for 90 days and require you to be signed in, because a
-public download of a Pokémon ROM is redistribution of Nintendo's game — this
-repo's `docs/LEGAL.md` rules that out. If you want a permanent link, build it
-locally:
-
-```bash
-bash tools/fetch_base.sh      # clones pret/pokeemerald
-bash tools/build_rom.sh       # writes dist/emerald.gba
-```
-
-### What is in the ROM
-
-Stock Emerald, compiled from source. The AI is **not** in the ROM — a Game Boy
-Advance has no network, so nothing can call a model from inside the cartridge.
-The AI lives in `site/index.html`, which runs the ROM in a browser and presses
-its buttons.
+The AI is not in the ROM — a Game Boy Advance has no network. The brain is the
+web page, which runs the ROM and presses its buttons.
 
 
 ## What is here
 
 ```
-site/index.html        the page: emulator, AI loop, settings
-tools/fetch_base.sh    fetch the pinned pokeemerald base
-tools/build_rom.sh     build the ROM (MODERN=1, arm-none-eabi)
-tools/romcheck.py      validate the built GBA header
-tools/boottest.c       headless GB boot test (binjgb, no display)
-patches/red/           mods against pret/pokered
+site/index.html        the page: emulator, AI loop, settings, save/reset
+gba/emerald_bridge.lua mGBA Lua bridge: memory reads and button input
+gba/emerald.py         driver for that bridge (position, map, party)
 tests/pure.test.js     unit tests for the parsing and local brain
 tests/ui.test.js       headless browser test of the page
-.github/workflows/     emerald build · red build · UI test · pages
+.github/workflows/     page test · pages deploy
 ```
 
 ## The two halves
@@ -92,15 +68,17 @@ Free plans have rate limits: raise "seconds between moves" if you see 429.
 - **One ROM per page visit.** Reload the page to switch games.
 - **Emerald's opening truck room** traps a pixel-only bot. Use Red for testing.
 
-## Build locally
+## Run locally
 
 ```bash
-bash tools/fetch_base.sh     # clone the pinned base into base/
-bash tools/build_rom.sh      # → dist/emerald.gba
-python3 tools/romcheck.py dist/emerald.gba
+python3 -m http.server 8000 -d site
 ```
 
-Needs `arm-none-eabi-gcc`, `make`, `python3`, `libpng-dev`.
+Open <http://localhost:8000>, press **LOAD ROM**, pick your Emerald `.gba`.
+Put the file at `site/emerald.gba` and it loads by itself.
+
+Nothing to install: the page is one HTML file, and the emulator is fetched from
+the EmulatorJS CDN on first run.
 
 ## Licences
 
