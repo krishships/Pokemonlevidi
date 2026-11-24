@@ -149,11 +149,26 @@ const check = (n, ok, extra) => { if (!ok) fails++; console.log((ok ? '  PASS ' 
     input.dispatchEvent(new Event('change', { bubbles: true }));
   });
   await sleep(1200);
-  // CI can be slow to attach the emulator stub; press WAKE again until calls flow
-  for (let attempt = 0; attempt < 5; attempt++) {
-    await page.evaluate(() => { const b = document.getElementById('startAI'); if (b) b.click(); });
+  // CI can be slow to attach the emulator stub. Press WAKE, and also send a
+  // whisper, which forces a tick even if the loop is being slow to start.
+  for (let attempt = 0; attempt < 6; attempt++) {
+    await page.evaluate(() => {
+      const w = document.getElementById('startAI'); if (w) w.click();
+      const box = document.getElementById('whisper');
+      const send = document.getElementById('send');
+      if (box && send) { box.value = 'go'; send.click(); }
+    });
     await waitFor(() => calls.length > 0, 6000);
     if (calls.length) break;
+  }
+  if (!calls.length) {
+    const why = await page.evaluate(() => ({
+      log: (document.getElementById('log') || {}).innerText || '',
+      emu: !!(window.EJS_emulator && window.EJS_emulator.gameManager),
+      settings: localStorage.getItem('redexe.v1')
+    }));
+    console.log('  NO CALLS. emu=' + why.emu + ' settings=' + String(why.settings).slice(0, 120));
+    console.log('  page log: ' + why.log.split('\n').filter(Boolean).slice(-8).join(' | '));
   }
   await waitFor(() => calls.some(c => c.hasImage) && calls.some(c => !c.hasImage), 35000);
 
