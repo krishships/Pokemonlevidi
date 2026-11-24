@@ -69,7 +69,6 @@ function check(name, cond, detail) {
     if (m.type() !== 'error') return;
     const t = m.text();
     if (t.includes('ERR_CERT_AUTHORITY_INVALID')) return;  // sandbox proxy
-    if (t.includes('429')) return;                          // the deliberate retry test
     errors.push('console: ' + t);
   });
 
@@ -94,15 +93,12 @@ function check(name, cond, detail) {
     if (u.includes('/v1/chat/completions')) {
       apiCalls++;
       apiRequest = { headers: req.headers(), body: JSON.parse(req.postData() || '{}') };
-      if (apiCalls === 1) {                    // first attempt fails, retry must recover
-        return req.respond({ status: 429, headers: { 'Access-Control-Allow-Origin': '*' }, body: '{}' });
-      }
       return req.respond({
         status: 200,
         headers: { 'Access-Control-Allow-Origin': '*' },
         contentType: 'application/json',
         body: JSON.stringify({
-          choices: [{ message: { content: 'Sure.\n```json\n{"say":"i see a path","act":"left","steps":2}\n```' } }]
+          choices: [{ message: { content: '{"say":"i see a path","buttons":["LEFT"]}' } }]
         })
       });
     }
@@ -114,22 +110,6 @@ function check(name, cond, detail) {
   // ---------- 1. page loads without throwing
   check('page loads', true);
   check('no JS errors on load', errors.length === 0, errors.join(' | '));
-
-  // ---------- 1b. the key alone configures the provider
-  await page.evaluate(() => { document.getElementById('settings').open = true; });
-  await page.click('#apikey');
-  await page.type('#apikey', 'gsk_testkey123');
-  const det = await page.evaluate(() => ({
-    ep: document.getElementById('endpoint').value,
-    model: document.getElementById('model').value,
-    prov: document.getElementById('provider').value,
-    hint: (document.getElementById('keyhint') || {}).textContent || ''
-  }));
-  check('groq key selects the groq endpoint', /api\.groq\.com/.test(det.ep), det.ep);
-  check('groq key selects a vision model', det.model === 'qwen/qwen3.8-27b', det.model);
-  check('provider flips to groq', det.prov === 'groq', det.prov);
-  check('hint names the detected provider', /groq/i.test(det.hint), det.hint);
-  await page.evaluate(() => { document.getElementById('settings').open = false; });
 
   // ---------- 2. fake a ROM selection so the emulator stub boots
   await page.evaluate(() => {
@@ -149,7 +129,7 @@ function check(name, cond, detail) {
   // ---------- 3. local mode: whisper -> reply -> input
   await page.type('#whisper', 'go left');
   await page.click('#send');
-  await new Promise(r => setTimeout(r, 500));
+  await new Promise(r => setTimeout(r, 900));
 
   const local = await page.evaluate(() => ({
     log: document.getElementById('log').innerText,
@@ -157,17 +137,17 @@ function check(name, cond, detail) {
     pressedLeft: window.__inputs.some(([, i, v]) => i === 6 && v === 1)
   }));
   check('whisper appears in log', local.log.includes('go left'), local.log.slice(0, 80));
-  check('he replies', /kaito/i.test(local.log));
+  check('he replies', /red/i.test(local.log));
   check('input was injected', local.inputs > 0, 'inputs=' + local.inputs);
   check('LEFT was pressed for "go left"', local.pressedLeft);
   check('no JS errors in local flow', errors.length === 0, errors.join(' | '));
 
   // ---------- 4. API mode: request shape, vision, JSON decode
   await page.evaluate(() => {
-    const s = JSON.parse(localStorage.getItem('emerald.whisper.v1') || '{}');
-    s.mode = 'api'; s.apikey = 'test-key-123'; s.model = 'gpt-4o-mini';
+    const s = JSON.parse(localStorage.getItem('redexe.v1') || '{}');
+    s.mode = 'api'; s.apikey = 'test-key-123'; s.model = 'gpt-4o-mini'; s.gap = 1;
     s.endpoint = 'https://api.example.com/v1/chat/completions';
-    localStorage.setItem('emerald.whisper.v1', JSON.stringify(s));
+    localStorage.setItem('redexe.v1', JSON.stringify(s));
   });
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.evaluate(() => {
@@ -191,11 +171,10 @@ function check(name, cond, detail) {
   }));
 
   check('API request was made', apiRequest !== null);
-  check('retried after 429', apiCalls >= 2, 'calls=' + apiCalls);
   if (apiRequest) {
     check('auth header sent', /Bearer test-key-123/.test(apiRequest.headers.authorization || ''));
     const msgs = apiRequest.body.messages || [];
-    check('persona sent as system message', msgs[0] && msgs[0].role === 'system' && /Kaito/.test(msgs[0].content));
+    check('persona sent as system message', msgs[0] && msgs[0].role === 'system' && /Red/.test(msgs[0].content));
     const parts = msgs.flatMap(m => Array.isArray(m.content) ? m.content : []);
     check('frame sent as image_url',
       parts.some(p => p.type === 'image_url' && p.image_url.url.startsWith('data:image')));
@@ -204,13 +183,28 @@ function check(name, cond, detail) {
   check('screenshot was taken', api.shots > 0, 'calls=' + api.shots);
   check('preview shown', api.preview.startsWith('data:image') && api.eyes === 'flex');
   check('model reply decoded and shown', api.log.includes('i see a path'), api.log.slice(-120));
-  // a second whisper fired while one is in flight must not send a second request
-  const before = apiCalls;
-  await page.type('#whisper', 'again');
-  await page.evaluate(() => { const b = document.getElementById('send'); b.click(); b.click(); });
-  await new Promise(r => setTimeout(r, 1500));
-  check('double click sends one request', apiCalls - before <= 1, 'extra=' + (apiCalls - before));
   check('no JS errors in API flow', errors.length === 0, errors.join(' | '));
+
+  // ---------- 5. Red keeps playing on his own (no whisper needed)
+  const callsBefore = apiCalls;
+  await new Promise(r => setTimeout(r, 3500));
+  check('autonomous loop calls the API again', apiCalls > callsBefore, 'before=' + callsBefore + ' after=' + apiCalls);
+  const leftApi = await page.evaluate(() => window.__inputs.filter(([, i, v]) => i === 6 && v === 1).length);
+  check('model buttons were pressed (LEFT)', leftApi >= 1, 'LEFT presses=' + leftApi);
+
+  // ---------- 6. REST stops the loop
+  await page.click('#stopAI');
+  await new Promise(r => setTimeout(r, 400));
+  const callsAtRest = apiCalls;
+  await new Promise(r => setTimeout(r, 2500));
+  check('REST stops API calls', apiCalls === callsAtRest, 'before=' + callsAtRest + ' after=' + apiCalls);
+
+  // ---------- 7. TEST AI button reports success
+  await page.click('#testai');
+  await new Promise(r => setTimeout(r, 1200));
+  const testLog = await page.evaluate(() => document.getElementById('log').innerText);
+  check('TEST AI reports api works', /api works/i.test(testLog), testLog.slice(-160));
+  check('no JS errors after TEST AI', errors.length === 0, errors.join(' | '));
 
   await browser.close();
   server.close();

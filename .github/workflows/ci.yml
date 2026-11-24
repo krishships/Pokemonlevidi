@@ -38,11 +38,26 @@ jobs:
       - name: Validate ROM header
         run: python3 tools/romcheck.py dist/emerald.gba
 
+      - name: Fingerprint the ROM
+        run: |
+          echo "commit : $GITHUB_SHA"
+          echo "size   : $(stat -c%s dist/emerald.gba) bytes"
+          echo "sha256 : $(sha256sum dist/emerald.gba | cut -d' ' -f1)"
+          echo "### emerald.gba" >> "$GITHUB_STEP_SUMMARY"
+          echo "| | |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| commit | \`${GITHUB_SHA:0:7}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| size | $(stat -c%s dist/emerald.gba) bytes |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| sha256 | \`$(sha256sum dist/emerald.gba | cut -d' ' -f1)\` |" >> "$GITHUB_STEP_SUMMARY"
+
       - uses: actions/upload-artifact@v4
         with:
           name: emerald-gba
-          path: dist/*.gba
+          path: |
+            dist/*.gba
+            base/pokeemerald/pokeemerald.map
           if-no-files-found: error
+          retention-days: 90
 
   red:
     name: Red ROM (GB)
@@ -108,5 +123,7 @@ jobs:
           npm init -y >/dev/null 2>&1
           npm i --silent puppeteer-core@24
           npx --yes puppeteer browsers install chrome
+      - name: Unit tests (pure functions)
+        run: node tests/pure.test.js
       - name: Run UI test
         run: node tests/ui.test.js
