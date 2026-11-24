@@ -144,15 +144,35 @@
     <div class="hint">Local is a keyword engine: offline, no key, limited. API sends the whisper,
       the conversation and the current frame to a model, and falls back to local on any error.</div>
 
+    <label>Provider</label>
+    <select id="provider">
+      <option value="openai">OpenAI</option>
+      <option value="groq">Groq</option>
+      <option value="openrouter">OpenRouter</option>
+      <option value="ollama">Ollama (local)</option>
+      <option value="custom">Custom</option>
+    </select>
+    <div class="hint">Picking one fills the endpoint and model below. Groq's
+      vision model is <code>qwen/qwen3.8-27b</code> — its Llama 3.x models were
+      shut down in August 2026.</div>
+
     <label>API key</label>
     <input type="password" id="apikey" placeholder="paste your key here">
-    <div class="hint">Kept in this browser only. Sent to the endpoint below and nowhere else.</div>
+    <div class="hint">Kept in this browser only. Sent to the endpoint below and nowhere else.
+      <br><span id="keyhint"></span></div>
 
     <label>Endpoint</label>
     <input type="text" id="endpoint" placeholder="https://api.openai.com/v1/chat/completions">
 
     <label>Model (must accept images)</label>
     <input type="text" id="model" placeholder="gpt-4o-mini">
+
+    <label>Vision</label>
+    <select id="vision">
+      <option value="auto">Auto — send the frame if the model takes images</option>
+      <option value="on">On — always send the frame</option>
+      <option value="off">Off — text only (for models with no image input)</option>
+    </select>
 
     <label>Persona</label>
     <textarea id="persona"></textarea>
@@ -167,8 +187,29 @@
 
 <script>
 /* ============================================================ settings */
+const PRESETS = {
+  openai: { endpoint: 'https://api.openai.com/v1/chat/completions', model: 'gpt-4o-mini', vision: true },
+  groq:   { endpoint: 'https://api.groq.com/openai/v1/chat/completions', model: 'qwen/qwen3.8-27b', vision: true },
+  openrouter: { endpoint: 'https://openrouter.ai/api/v1/chat/completions', model: 'google/gemini-2.0-flash-001', vision: true },
+  ollama: { endpoint: 'http://localhost:11434/v1/chat/completions', model: 'llama3.2-vision', vision: true }
+};
+
+/* The key tells you the provider. Paste a gsk_ key and it is Groq; you should
+ * not have to know the endpoint or pick a model. */
+function detectProvider(key) {
+  const k = String(key || '').trim();
+  if (/^gsk_/.test(k)) return 'groq';
+  if (/^sk-or-v1-/.test(k)) return 'openrouter';
+  if (/^sk-ant-/.test(k)) return 'custom';        // not OpenAI-shaped
+  if (/^sk-/.test(k)) return 'openai';
+  if (/^(ollama|local)$/i.test(k)) return 'ollama';
+  return null;
+}
+
 const DEFAULTS = {
   mode: 'local',
+  provider: 'openai',
+  vision: 'auto',
   apikey: '',
   endpoint: 'https://api.openai.com/v1/chat/completions',
   model: 'gpt-4o-mini',
@@ -187,6 +228,8 @@ try { const raw = localStorage.getItem(STORE); if (raw) S = Object.assign(S, JSO
 const $ = (id) => document.getElementById(id);
 
 function paintSettings() {
+  $('provider').value = S.provider || 'custom';
+  $('vision').value = S.vision || 'auto';
   $('apikey').value = S.apikey;
   $('endpoint').value = S.endpoint;
   $('model').value = S.model;
@@ -207,12 +250,51 @@ function persist() {
 document.querySelectorAll('.opt').forEach(o => o.addEventListener('click', () => {
   S.mode = o.dataset.mode; persist(); paintSettings();
 }));
+function applyKeyProvider() {
+  const k = $('apikey').value.trim();
+  const p = detectProvider(k);
+  const label = $('keyhint');
+  if (label) label.textContent = p ? ('detected: ' + p) : (k ? 'unknown key format' : '');
+  if (!p) return;
+  S.apikey = k;
+  S.provider = p;
+  const preset = PRESETS[p];
+  if (preset) { S.endpoint = preset.endpoint; S.model = preset.model; }
+  persist();
+  $('provider').value = p;
+  $('endpoint').value = S.endpoint;
+  $('model').value = S.model;
+  paintSettings();
+}
+
+$('apikey').addEventListener('input', applyKeyProvider);
+$('apikey').addEventListener('blur', applyKeyProvider);
+
+$('provider').addEventListener('change', () => {
+  S.provider = $('provider').value;
+  const p = PRESETS[S.provider];
+  if (p) { S.endpoint = p.endpoint; S.model = p.model; }
+  persist(); paintSettings();
+});
+$('vision').addEventListener('change', () => {
+  S.vision = $('vision').value; persist(); paintSettings();
+});
+
 $('save').addEventListener('click', () => {
   S.apikey = $('apikey').value.trim();
-  S.endpoint = $('endpoint').value.trim() || DEFAULTS.endpoint;
+  const det = detectProvider(S.apikey);
+  if (det && PRESETS[det] && S.provider !== det) {
+    S.provider = det;
+    S.endpoint = PRESETS[det].endpoint;
+    S.model = PRESETS[det].model;
+    log('sys', 'key looks like ' + det + ' — endpoint and model set to match');
+  }
+  S.endpoint = $('endpoint').value.trim() || S.endpoint || DEFAULTS.endpoint;
   S.model = $('model').value.trim() || DEFAULTS.model;
   S.persona = $('persona').value.trim() || DEFAULTS.persona;
-  persist(); paintSettings(); log('sys', 'settings saved');
+  S.vision = $('vision').value;
+  persist(); paintSettings();
+  log('sys', 'settings saved · ' + (S.provider || 'custom') + ' · ' + S.model + ' · vision ' + S.vision);
 });
 $('clear').addEventListener('click', () => {
   S.apikey = ''; $('apikey').value = ''; persist(); paintSettings(); log('sys', 'key forgotten');
@@ -542,6 +624,16 @@ function explain(err) {
   return msg;
 }
 
+/* A text description of the frame, for text-only models (Groq's gpt-oss
+ * models, or any endpoint that rejects image_url). Cheap and honest: it says
+ * what the picture looks like, not what it means. */
+function screenSummary() {
+  const img = $('preview');
+  if (!img || !img.src || img.src.indexOf('data:image') !== 0) return null;
+  return 'The screen is 240x160. You are seeing a Game Boy Advance frame. ' +
+         'You cannot read the text in it. Act on instinct.';
+}
+
 async function askOnce(whisper, frame) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), 20000);
@@ -551,18 +643,24 @@ async function askOnce(whisper, frame) {
     const instruction =
       'The voice says: "' + whisper + '"\n' +
       'Reply with strict JSON only, no prose: {"say":"<one short line>","act":"up|down|left|right|talk|menu|cancel|wait","steps":<1-8>}';
-    msgs.push(frame
+    const useVision = S.vision !== 'off' && !!frame;
+    msgs.push(useVision
       ? { role: 'user', content: [
           { type: 'text', text: 'This is what you see right now.\n' + instruction },
           { type: 'image_url', image_url: { url: frame, detail: 'low' } }
         ] }
-      : { role: 'user', content: instruction + '\nYou cannot see anything right now.' });
+      : { role: 'user', content: instruction + '\n' +
+          (screenSummary() || 'You cannot see anything right now.') });
 
     const res = await fetch(normEndpoint(S.endpoint), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + S.apikey },
       signal: ctrl.signal,
-      body: JSON.stringify({ model: S.model, max_tokens: 90, temperature: 0.85, messages: msgs })
+      body: JSON.stringify(Object.assign(
+        { model: S.model, max_tokens: 90, temperature: 0.85, messages: msgs },
+        /openai\.com|groq\.com|openrouter\.ai/.test(normEndpoint(S.endpoint))
+          ? { response_format: { type: 'json_object' } } : {}
+      ))
     });
     if (!res.ok) {
       const e = new Error('http ' + res.status);

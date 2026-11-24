@@ -115,6 +115,22 @@ function check(name, cond, detail) {
   check('page loads', true);
   check('no JS errors on load', errors.length === 0, errors.join(' | '));
 
+  // ---------- 1b. the key alone configures the provider
+  await page.evaluate(() => { document.getElementById('settings').open = true; });
+  await page.click('#apikey');
+  await page.type('#apikey', 'gsk_testkey123');
+  const det = await page.evaluate(() => ({
+    ep: document.getElementById('endpoint').value,
+    model: document.getElementById('model').value,
+    prov: document.getElementById('provider').value,
+    hint: (document.getElementById('keyhint') || {}).textContent || ''
+  }));
+  check('groq key selects the groq endpoint', /api\.groq\.com/.test(det.ep), det.ep);
+  check('groq key selects a vision model', det.model === 'qwen/qwen3.8-27b', det.model);
+  check('provider flips to groq', det.prov === 'groq', det.prov);
+  check('hint names the detected provider', /groq/i.test(det.hint), det.hint);
+  await page.evaluate(() => { document.getElementById('settings').open = false; });
+
   // ---------- 2. fake a ROM selection so the emulator stub boots
   await page.evaluate(() => {
     const input = document.getElementById('rom');
