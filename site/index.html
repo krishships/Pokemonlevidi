@@ -897,7 +897,11 @@ async function readScreenText() {
   const img = $('preview');
   if (!img || !img.src || img.src.indexOf('data:image') !== 0) return '';
   try {
-    const w = await loadOcr();
+    // never wait more than 2.5 s for the OCR engine; a slow CDN must not stall the game
+    const w = await Promise.race([
+      loadOcr(),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('ocr slow')), 2500))
+    ]);
     const c = document.createElement('canvas');
     const sw = img.naturalWidth || 240, sh = img.naturalHeight || 160;
     const y0 = Math.floor(sh * 0.55);                       // dialogue boxes sit in the lower part
@@ -1202,6 +1206,10 @@ async function bootRestore() {
     } catch (e) { /* not there, that is fine */ }
   }
 })();
+
+/* fetch the OCR engine in the background at startup, so the first dialogue box
+ * does not wait for it, and a failure only turns OCR off. */
+setTimeout(() => { if (S.ocr === 'on') loadOcr().catch(() => {}); }, 4000);
 
 /* =========================================================== test the AI */
 $('testai').addEventListener('click', async () => {
