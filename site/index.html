@@ -1185,7 +1185,9 @@ function screenToText() {
       (exits.length ? ' Exits: ' + exits.join(' ') + '.' : ' No exits on any edge.') +
       ' You are the figure at the centre of the grid.',
       near,
-      'Grid 30x20, one letter per 8x8 tile, top row first. ' +
+      'Grid 30x20, one letter per 8x8 tile, top row first. A number after a letter ' +
+      'is how many in a row it repeats (T30 = 30 tree tiles), and xN after a row means ' +
+      'that whole row repeats N times. Letters: ' +
       'W white K black S grey D dark grey T tree V tall grass G grass P path ' +
       'B brown U water A sky R red Y yellow ? mixed',
       enc.join('/')
