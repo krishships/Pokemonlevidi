@@ -38,7 +38,7 @@
            border:3px solid var(--ink);background:var(--ink)}
   #eyetext{font-size:8px;line-height:2;white-space:pre-line}
 
-  .menu{margin-top:10px;display:grid;grid-template-columns:1fr 1fr;gap:0 10px;padding:8px 10px}
+  .menu{margin-top:10px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 8px;padding:8px 10px}
   .mi{font:inherit;font-size:10px;text-align:left;background:none;border:0;color:var(--ink);cursor:pointer;
       padding:9px 4px;min-height:40px}
   .mi::before{content:'\25B6';visibility:hidden;margin-right:6px}
@@ -64,7 +64,7 @@
   input:focus-visible,textarea:focus-visible,#send:focus-visible{outline:3px solid var(--dark);outline-offset:2px}
 
   details{margin-top:10px}
-  summary{cursor:pointer;list-style:none;padding:2px 0;min-height:32px;display:flex;align-items:center}
+  summary{cursor:pointer;list-style:none;padding:2px 0;min-height:44px;display:flex;align-items:center}
   summary::-webkit-details-marker{display:none}
   summary::before{content:'\25B6 ';margin-right:6px}
   details[open] summary::before{content:'\25BC '}
@@ -106,11 +106,11 @@
   /* a small way out, tap the picture */
   #exitg{display:none;position:fixed;top:10px;right:10px;z-index:100000;
          padding:10px 14px;font:inherit;border-radius:999px;border:2px solid #fff;
-         background:rgba(0,0,0,.55);color:#fff;opacity:.55}
+         background:rgba(0,0,0,.72);color:#fff;opacity:.92;font-size:13px}
   body.gonly #exitg{display:block!important}
   body.fs #stage{grid-area:stage;margin:0;width:100%;justify-self:center}
   body.fs .menu{grid-area:bar;margin:0;display:flex;gap:0 14px;padding:2px 10px;justify-content:space-between}
-  body.fs .menu .mi{display:none;min-height:34px;padding:4px}
+  body.fs .menu .mi{display:none;min-height:40px;padding:4px}
   body.fs .menu .mi.keep{display:block}
   body.fs #log{grid-area:log;margin:0;height:auto;min-height:0}
   body.fs #say{grid-area:say;margin:0}
@@ -128,11 +128,11 @@
   <div id="modeLabel">local brain</div>
 </header>
 
-<button id="exitg" title="exit game only">✕</button>
+<button id="exitg" title="exit game only" aria-label="exit game only">✕ exit</button>
 <div id="stage">
   <div id="game"></div>
   <div id="empty">
-    <div>LOAD YOUR ROM<br>Pokemon Red (.gb/.gbc)<br>or a .gba file<br><br>Then wake RED.</div>
+    <div>LOAD YOUR ROM<br>a .gba file<br>or a .zip of one<br><br>Then wake RED.</div>
   </div>
 </div>
 
@@ -143,7 +143,7 @@
   <span id="eyetext"></span>
 </div>
 
-<input type="file" id="rom" accept=".gb,.gbc,.gba" style="display:none">
+<input type="file" id="rom" accept=".gba,.zip,.gb,.gbc" style="display:none">
 <nav class="menu box" aria-label="Controls">
   <button class="mi" id="pick">LOAD ROM</button>
   <button class="mi keep" id="startAI">WAKE RED</button>
@@ -218,9 +218,10 @@
 
     <label>PICTURE EVERY N CALLS</label>
     <input type="text" id="imgEvery" inputmode="numeric" placeholder="3">
-    <div class="hint">Vision tokens are what runs you into 429. He gets a text description of
-      the screen on the other calls, and the real picture on every Nth — or immediately when you
-      speak to him, or when he has not moved for a few tries. Set 1 to always send the image.</div>
+    <div class="hint">Vision tokens are what runs you into 429. Every turn he already gets the
+      screen decoded to text — a 24x16 letter grid, the borders, whether a text box is open. The
+      real picture is only extra. Set <b>0</b> to never send it and play text-only, <b>1</b> to
+      always send it.</div>
 
     <label>SECONDS BETWEEN RED'S MOVES</label>
     <input type="text" id="gap" inputmode="numeric" placeholder="5">
@@ -319,9 +320,11 @@ const OLD_PERSONAS = [
   'Speak in short lowercase lines.'
 ];
 const DEFAULT_PERSONA =
-  'You are Red. You have just arrived in this world and you are completely new to it. ' +
+  'You are called Red, but the name means nothing to you — you did not choose it and it carries no history. ' +
+  'You have just arrived in this world and you are completely new to it. ' +
   'FORGET EVERYTHING. You have never played this game and you do not recognise it. ' +
-  'You do not know any creature, town, route, gym, item, badge, character, mechanic or story beat. ' +
+  'You do not know what anything here is called, what it is for, or what happens next. ' +
+  'You have no map, no guide, no rules and no story. ' +
   'Any name you think you remember is a guess and must not be trusted. ' +
   'Never say or imply that you know what something is, what it does, or where it leads unless ' +
   'the screen shows it or Dev told you. If you catch yourself "knowing", say out loud that you are guessing. ' +
@@ -408,9 +411,10 @@ S.endpoint = DEFAULTS.endpoint;
 }
 /* ?api=<url> overrides the endpoint. Useful when a provider blocks browser
  * calls and you put a small proxy in front of it. Nothing else can change it. */
+let proxyEndpoint = '';
 try {
   const q = new URLSearchParams(location.search).get('api');
-  if (q && /^https?:\/\//.test(q)) S.endpoint = q;
+  if (q && /^https?:\/\//.test(q)) { S.endpoint = q; proxyEndpoint = q; }
 } catch (e) {}
 if (OLD_PERSONAS.includes(S.persona)) S.persona = DEFAULT_PERSONA;   // upgrade an untouched old default; custom personas stay
 
@@ -444,7 +448,7 @@ function collect() {
   S.endpoint = $('endpoint').value.trim() || DEFAULTS.endpoint;
   S.model = normaliseModel($('model').value);
   S.gap = Math.max(1, Math.min(60, parseFloat($('gap').value) || 5));
-  S.imgEvery = Math.max(1, Math.min(50, parseInt($('imgEvery').value, 10) || 3));
+  S.imgEvery = Math.max(0, Math.min(50, parseInt($('imgEvery').value, 10)));   // 0 = never send it
   S.eyesModel = $('eyesModel').value;
   S.ocr = $('ocr').value;
   S.persona = $('persona').value.trim() || DEFAULT_PERSONA;
@@ -472,7 +476,7 @@ function keyDetect() {
   // one paste is the whole setup: API brain on, settings saved, nothing to press
   S.apikey = k;
   S.mode = 'api';
-  S.endpoint = preset.endpoint;
+  if (!proxyEndpoint) S.endpoint = preset.endpoint;   // ?api= wins over the preset
   S.model = normaliseModel($('model').value);
   persist();
   paintSettings();
@@ -501,7 +505,7 @@ function openSettings() {
   $('settings').open = true;
   $('settings').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
-setTimeout(() => log('sys', 'page build: ' + BUILD + (BUILD === '__BUILD__' ? ' (local copy, not from CI)' : '')), 300);
+setTimeout(() => { if (BUILD !== '__BUILD__') logOnce('build ' + BUILD); }, 300);
 
 $('apibtn').addEventListener('click', () => { openSettings(); setTimeout(() => $('apikey').focus(), 350); });
 
@@ -628,6 +632,7 @@ $('rom').addEventListener('change', (e) => {
 });
 
 function startRom(file, restored) {
+  if (loaderAdded) { log('sys', 'the emulator can load only one ROM per page visit. reload the page to switch.'); return; }
   romName = file.name;
   if (loaderAdded) { log('sys', 'the emulator can load only one ROM per page visit. reload the page to switch.'); return; }
   loaderAdded = true;
@@ -653,7 +658,7 @@ function startRom(file, restored) {
 
   const s = document.createElement('script');
   s.src = window.EJS_pathtodata + 'loader.js';
-  s.onerror = () => log('sys', 'could not load the emulator from the CDN');
+  s.onerror = () => { loaderAdded = false; log('sys', 'could not load the emulator from the CDN — check the connection and press LOAD ROM again'); };
   document.body.appendChild(s);
   if (!restored) idbPut('rom', { name: file.name, blob: file }).catch(() => {});
 }
@@ -776,7 +781,7 @@ async function callModel(userText, frame, withHistory, ov) {
   const MODEL = (ov && ov.model) || S.model;
   const KEY = (ov && ov.key) || S.apikey;
   if (!KEY) throw apiError('no key');
-  const useImage = !!frame && !noVision;
+  const useImage = !!frame && ((ov && ov.alwaysImage) ? true : !noVision);
   const content = useImage
     ? [{ type: 'text', text: userText },
        { type: 'image_url', image_url: Object.assign({ url: frame }, /openai\.com/.test(EP) ? { detail: 'low' } : {}) }]
@@ -794,7 +799,7 @@ async function callModel(userText, frame, withHistory, ov) {
       signal: ctrl.signal,
       body: JSON.stringify(Object.assign(
         { model: MODEL, max_tokens: 500, temperature: 0.6, messages: msgs },
-        providerExtras(EP, MODEL)
+        (ov && ov.plain) ? {} : providerExtras(EP, MODEL)
       ))
     });
     if (!res.ok) {
@@ -854,7 +859,9 @@ function frameKey(frame) {
 }
 
 const EYES_PROMPT =
-  'You are only the eyes of a player looking at a Game Boy Advance screen. ' +
+  'You are only the eyes of a player looking at a small pixel screen. ' +
+  'Describe shapes, colours and layout only. Do not name characters, creatures, places or items, ' +
+  'and do not use anything you think you recognise — if something looks familiar, say what it looks like instead. ' +
   'Report, in under 60 words and with no advice: (1) any dialogue text, copied exactly; ' +
   '(2) menu items visible; (3) whether a text box is open; (4) what the player is standing next to. ' +
   'If the screen is blank or in transition, say so.';
@@ -951,7 +958,7 @@ function motionNote(a, b) {
   // the world scrolls opposite to the walker
   const walker = { left: 'right', right: 'left', up: 'down', down: 'up' };
   return best ? 'The view scrolled ' + best.name + ', so you probably walked ' + walker[best.name] + '.'
-              : 'The view changed a lot (a new area, menu or battle?).';
+              : 'The view changed a lot (a new area, or a menu?).';
 }
 
 /* optional free OCR in the browser, so a text-only model can read dialogue */
@@ -965,7 +972,7 @@ function loadOcr() {
     sc.onerror = () => rej(new Error('could not load tesseract.js'));
     document.head.appendChild(sc);
   });
-  ocrLoading.catch(() => { S.ocr = 'off'; logOnce('ocr: could not load, turned off'); });
+  ocrLoading.catch(() => { ocrLoading = null; S.ocr = 'off'; logOnce('ocr: could not load, turned off — turn it back on to retry'); });
   return ocrLoading;
 }
 async function readScreenText() {
@@ -999,6 +1006,68 @@ async function readScreenText() {
     const { data } = await w.recognize(c);
     const t = String(data.text || '').replace(/[^\w\s.,!?'":;-]/g, ' ').replace(/\s+/g, ' ').trim();
     return t.length >= 4 ? t.slice(0, 200) : '';
+  } catch (e) { return ''; }
+}
+
+/* Turn the frame into text, well enough that a model which never sees the
+ * picture can still act: a fine grid of the whole screen, what each border
+ * looks like, whether a text box is open, and the dominant colours.
+ * This is the "image to text" path: with it, vision is optional. */
+function screenToText() {
+  const img = $('preview');
+  if (!img || !img.src || img.src.indexOf('data:image') !== 0) return '';
+  try {
+    const W = 192, H = 128;                       // 2x the GBA frame, keeps detail
+    const c = document.createElement('canvas'); c.width = W; c.height = H;
+    const x = c.getContext('2d');
+    x.imageSmoothingEnabled = false;
+    x.drawImage(img, 0, 0, W, H);
+    const d = x.getImageData(0, 0, W, H).data;
+    const px = (i, j) => { const p = (j * W + i) * 4; return [d[p], d[p + 1], d[p + 2]]; };
+
+    // fine grid: 24 x 16 cells, one letter each
+    const GW = 24, GH = 16, rows = [];
+    for (let gy = 0; gy < GH; gy++) {
+      let row = '';
+      for (let gx = 0; gx < GW; gx++) {
+        let r = 0, g = 0, b = 0, n = 0;
+        for (let j = Math.floor(gy * H / GH); j < Math.floor((gy + 1) * H / GH); j += 2)
+          for (let i = Math.floor(gx * W / GW); i < Math.floor((gx + 1) * W / GW); i += 2) {
+            const q = px(i, j); r += q[0]; g += q[1]; b += q[2]; n++;
+          }
+        row += cellLetter(r / n, g / n, b / n);
+      }
+      rows.push(row);
+    }
+
+    // borders: what is along each edge, so walls are obvious without a picture
+    const edge = (cells) => {
+      const counts = {};
+      for (const ch of cells) counts[ch] = (counts[ch] || 0) + 1;
+      return Object.entries(counts).sort((a, b) => b[1] - a[1]).map(e => e[0]).slice(0, 2).join('');
+    };
+    const left = edge(rows.map(r => r[0]));
+    const right = edge(rows.map(r => r[r.length - 1]));
+    const top = edge(rows[0].split(''));
+    const bottom = edge(rows[rows.length - 1].split(''));
+
+    // is a text box across the bottom?
+    let bw = 0, bn = 0;
+    for (let j = Math.floor(H * 0.72); j < H; j++) for (let i = 0; i < W; i++) {
+      const q = px(i, j); bn++;
+      if (q[0] > 235 && q[1] > 235 && q[2] > 235) bw++;
+    }
+    const boxOpen = bw / Math.max(1, bn) > 0.35;
+
+    const centre = px(W >> 1, H >> 1);
+    return [
+      'SCREEN ' + (boxOpen ? '— a text box is open across the bottom.' : '— no text box.'),
+      'BORDERS: left ' + left + ', right ' + right + ', top ' + top + ', bottom ' + bottom + '.',
+      'CENTRE colour: ' + colourName(centre[0], centre[1], centre[2]) + '.',
+      'GRID 24x16, one letter per cell, top row first (W white, K black, S grey, D dark grey, ' +
+      'T dark green, G light green, P sand, B brown, U blue, R red, Y yellow, . other):',
+      rows.join('\n')
+    ].join('\n');
   } catch (e) { return ''; }
 }
 
@@ -1063,7 +1132,9 @@ async function callEyes(frame) {
     endpoint: S.endpoint,                   // Groq only: collect() pins this
     model: S.eyesModel || S.model,
     key: S.apikey,
-    system: EYES_PROMPT
+    system: EYES_PROMPT,
+    alwaysImage: true,                      // a vision rejection must not blind the eyes
+    plain: true                             // prose, so no JSON mode
   };
   const r = await callModel('Describe this screen.', frame, false, ov);
   return String(r.text || '').replace(/\s+/g, ' ').slice(0, 400);
@@ -1114,11 +1185,14 @@ async function thinkApi(heard) {
   const wasStuck = stuck >= 2;
   const sceneNow = lastScene;
   const sceneChanged = sceneNow && sceneNow !== sceneSeenAtLastPicture;
-  const wantPicture = heard.length > 0 || wasStuck || sceneChanged ||
-                      (tickCount % S.imgEvery === 0);
+  const neverPicture = S.imgEvery === 0;                 // text-only: the decoder carries it
+  const wantPicture = !neverPicture && (heard.length > 0 || wasStuck || sceneChanged ||
+                      (tickCount % S.imgEvery === 0));
   const picture = (seen || !wantPicture) ? null : (lastJpeg || frame);
   if (picture) sceneSeenAtLastPicture = lastScene;
   let prompt = heardText(heard, frame);
+  const decoded = screenToText();
+  if (decoded) prompt += '\n\nWhat the screen decodes to:\n' + decoded;
   if (stuckCount >= 3) {
     prompt += '\n\nYou have tried ' + stuckCount + ' times and the screen has not changed once. ' +
               'Whatever you are doing is not working. Do something clearly different this turn.';
@@ -1154,7 +1228,7 @@ async function thinkApi(heard) {
   if (act.buttons && act.buttons.length && DIRS.includes(act.buttons[0]) && gridNow) {
     const better = suggestAction(gridNow, act.buttons[0]);
     if (better && better !== act.buttons[0]) {
-      log('sys', 'map memory: ' + act.buttons[0] + ' did nothing here before, trying ' + better);
+      logOnce('map memory: ' + act.buttons[0] + ' did nothing here before, trying ' + better);
       act.buttons[0] = better;
     }
   }
@@ -1273,8 +1347,8 @@ function speak() {
     if (!wake()) {
       // the emulator is not ready yet: keep what was said and try again, rather
       // than dropping the whisper on the floor
-      log('sys', 'not ready yet — your message is queued, it will be heard as soon as the ROM is up');
-      const retry = setInterval(() => { if (wake()) { clearInterval(retry); nudge(); } }, 800);
+      logOnce('not ready yet — your message is queued, it will be heard as soon as the ROM is up');
+      const retry = setInterval(() => { if (emu && wake()) { clearInterval(retry); nudge(); } }, 800);
       setTimeout(() => clearInterval(retry), 60000);
     }
   }
