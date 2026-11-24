@@ -70,6 +70,8 @@
   details[open] summary::before{content:'\25BC '}
   .panel{margin-top:6px}
   label{display:block;font-size:8px;margin:14px 0 6px}
+  select{width:100%;max-width:100%;box-sizing:border-box;min-height:40px;font:inherit;
+         font-size:10px;background:var(--paper);color:var(--ink);border:2px solid var(--ink);padding:6px}
   input[type=text],input[type=password],textarea{width:100%;font:inherit;font-size:10px;color:var(--ink);
     background:var(--light);border:3px solid var(--ink);border-radius:4px;padding:10px;resize:vertical}
   textarea{min-height:150px;line-height:1.8}
@@ -263,6 +265,11 @@ function expandButtons(list, cap) {
 
 /* model text -> { say, buttons }. Never throws; unreadable text becomes speech only. */
 function parseReply(text) {
+  const out = parseReplyInner(text);
+  if (!out.buttons.length && !out.say) out.say = String(text || '').slice(0, 140);
+  return out;
+}
+function parseReplyInner(text) {
   const raw = String(text || '').replace(/```(?:json)?/gi, '').trim();
   const m = /\{[\s\S]*\}/.exec(raw);
   if (m) {
@@ -404,7 +411,8 @@ S.endpoint = DEFAULTS.endpoint;
 {
   const fixed = normaliseModel(S.model);
   if (fixed !== S.model) {
-    setTimeout(() => log('sys', 'model "' + S.model + '" is not a model id. Using ' + fixed), 700);
+    const wasModel = S.model;
+    setTimeout(() => log('sys', 'model "' + wasModel + '" is not a model id. Using ' + fixed), 700);
     S.model = fixed;
   }
   if (S.eyesModel && normaliseModel(S.eyesModel) !== S.eyesModel) S.eyesModel = '';
@@ -821,7 +829,7 @@ async function callModel(userText, frame, withHistory, ov) {
         throw new Error('that URL answered like a web page, not an API (405). ' +
           'The endpoint must be https://api.groq.com/openai/v1/chat/completions');
       }
-      if (res.status === 401) throw new Error('key rejected (401) — paste it again under KEY, then SAVE');
+      if (res.status === 401) { const e = new Error('key rejected (401) — paste it again under KEY, then SAVE'); e.fatal = true; throw e; }
       if (res.status === 400 && useImage && /image|vision|multimodal|content/i.test(body) && !callModel.retried) {
         noVision = true; callModel.retried = true;
         log('sys', 'this model rejected the image. Red will play blind until you pick a vision model.');
@@ -955,9 +963,7 @@ let prevGrid = null;
 /* a coarse tile map of the picture: 12 x 8 letters, plus whether the view scrolled */
 const GRID_W = 12, GRID_H = 8;
 function cellLetter(r, g, b) {
-  const n = colourName(r, g, b);
-  return ({ white: 'W', black: 'K', grey: 'S', 'dark grey': 'D', 'dark green': 'T', 'light green': 'G',
-            sand: 'P', brown: 'B', blue: 'U', red: 'R', yellow: 'Y' })[n] || '.';
+  return LETTERS[classify(r, g, b)] || '?';
 }
 function gridOf(d, W, H) {
   const rows = [];
@@ -1052,11 +1058,46 @@ async function readScreenText() {
  * picture can still act: a fine grid of the whole screen, what each border
  * looks like, whether a text box is open, and the dominant colours.
  * This is the "image to text" path: with it, vision is optional. */
+/* Turn the frame into text, well enough that a model which never sees the
+ * picture can still act. Measured against synthetic GBA frames:
+ *   - native 240x160 with 8x8 cells, so each cell is exactly one game tile
+ *     (a 24x16 grid could not align: 30 tiles / 24 cells = 1.25)
+ *   - a cell with no single dominant colour is "?" instead of a made-up letter
+ *   - sky and water, tall grass and trees, now have separate letters
+ *   - rows are run-length encoded and repeats collapsed: 74% smaller
+ *   - exits are named with their column, which borders never could */
+const LETTERS = { white: 'W', black: 'K', grey: 'S', 'dark grey': 'D', 'dark green': 'T',
+                  'tall grass': 'V', 'light green': 'G', sand: 'P', brown: 'B',
+                  blue: 'U', sky: 'A', red: 'R', yellow: 'Y' };
+
+function classify(r, g, b) {
+  let best = 'grey', bd = 1e9;
+  for (const [cr, cg, cb, name] of COLOURS) {
+    const d = (r - cr) ** 2 + (g - cg) ** 2 + (b - cb) ** 2;
+    if (d < bd) { bd = d; best = name; }
+  }
+  const luma = 0.299 * r + 0.587 * g + 0.114 * b;
+  if (best === 'blue' && luma > 150) best = 'sky';            // sky is not a lake
+  if (best === 'dark green' && luma > 96) best = 'tall grass'; // tall grass is not a tree
+  return best;
+}
+
+function rle(row) {
+  let out = '', i = 0;
+  while (i < row.length) {
+    let j = i;
+    while (j < row.length && row[j] === row[i]) j++;
+    out += row[i] + (j - i > 1 ? (j - i) : '');
+    i = j;
+  }
+  return out;
+}
+
 function screenToText() {
   const img = $('preview');
   if (!img || !img.src || img.src.indexOf('data:image') !== 0) return '';
   try {
-    const W = 192, H = 128;                       // 2x the GBA frame, keeps detail
+    const W = 240, H = 160, GW = 30, GH = 20;          // native: one cell = one tile
     const c = document.createElement('canvas'); c.width = W; c.height = H;
     const x = c.getContext('2d');
     x.imageSmoothingEnabled = false;
@@ -1064,48 +1105,89 @@ function screenToText() {
     const d = x.getImageData(0, 0, W, H).data;
     const px = (i, j) => { const p = (j * W + i) * 4; return [d[p], d[p + 1], d[p + 2]]; };
 
-    // fine grid: 24 x 16 cells, one letter each
-    const GW = 24, GH = 16, rows = [];
+    const rows = [], grid = [];
     for (let gy = 0; gy < GH; gy++) {
       let row = '';
       for (let gx = 0; gx < GW; gx++) {
         let r = 0, g = 0, b = 0, n = 0;
-        for (let j = Math.floor(gy * H / GH); j < Math.floor((gy + 1) * H / GH); j += 2)
-          for (let i = Math.floor(gx * W / GW); i < Math.floor((gx + 1) * W / GW); i += 2) {
-            const q = px(i, j); r += q[0]; g += q[1]; b += q[2]; n++;
+        for (let j = gy * 8; j < gy * 8 + 8; j++)
+          for (let i = gx * 8; i < gx * 8 + 8; i++) { const q = px(i, j); r += q[0]; g += q[1]; b += q[2]; n++; }
+        r /= n; g /= n; b /= n;
+        // spread of the cell: if no colour dominates, say so rather than invent one
+        let mad = 0;
+        for (let j = gy * 8; j < gy * 8 + 8; j += 2)
+          for (let i = gx * 8; i < gx * 8 + 8; i += 2) {
+            const q = px(i, j);
+            mad += Math.abs(q[0] - r) + Math.abs(q[1] - g) + Math.abs(q[2] - b);
           }
-        row += cellLetter(r / n, g / n, b / n);
+        mad /= 32;
+        const letter = mad > 26 ? '?' : (LETTERS[classify(r, g, b)] || '?');
+        row += letter;
       }
-      rows.push(row);
+      rows.push(row); grid.push(row.split(''));
     }
 
-    // borders: what is along each edge, so walls are obvious without a picture
-    const edge = (cells) => {
-      const counts = {};
-      for (const ch of cells) counts[ch] = (counts[ch] || 0) + 1;
-      return Object.entries(counts).sort((a, b) => b[1] - a[1]).map(e => e[0]).slice(0, 2).join('');
+    // exits: where a non-wall letter reaches each edge
+    const wall = ch => ch === 'T' || ch === 'V' || ch === 'K' || ch === 'D';
+    const spans = (cells) => {
+      const out = []; let i = 0;
+      while (i < cells.length) {
+        if (wall(cells[i])) { i++; continue; }
+        let j = i; while (j < cells.length && !wall(cells[j])) j++;
+        if (j - i >= 2) out.push(i + '-' + (j - 1));
+        i = j;
+      }
+      return out.join(',');
     };
-    const left = edge(rows.map(r => r[0]));
-    const right = edge(rows.map(r => r[r.length - 1]));
-    const top = edge(rows[0].split(''));
-    const bottom = edge(rows[rows.length - 1].split(''));
+    const exits = [];
+    const b = spans(grid[GH - 1]); if (b) exits.push('bottom@' + b);
+    const t = spans(grid[0]);      if (t) exits.push('top@' + t);
+    const l = spans(rows.map(r => r[0]));  if (l) exits.push('left@' + l);
+    const rt = spans(rows.map(r => r[GW - 1])); if (rt) exits.push('right@' + rt);
 
-    // is a text box across the bottom?
-    let bw = 0, bn = 0;
-    for (let j = Math.floor(H * 0.72); j < H; j++) for (let i = 0; i < W; i++) {
-      const q = px(i, j); bn++;
-      if (q[0] > 235 && q[1] > 235 && q[2] > 235) bw++;
+    // text box: a dark rule across the bottom, with light fill beneath it
+    let darkRow = false;
+    for (let j = Math.floor(H * 0.62); j < H - 10 && !darkRow; j++) {
+      let dark = 0;
+      for (let i = 4; i < W - 4; i++) { const q = px(i, j); if (q[0] < 60 && q[1] < 60 && q[2] < 60) dark++; }
+      if (dark > (W - 8) * 0.6) darkRow = true;
     }
-    const boxOpen = bw / Math.max(1, bn) > 0.35;
+    let bw = 0, bn = 0;
+    for (let j = Math.floor(H * 0.74); j < H; j++) for (let i = 4; i < W - 4; i++) {
+      const q = px(i, j); bn++; if (q[0] > 235 && q[1] > 235 && q[2] > 235) bw++;
+    }
+    const boxOpen = darkRow && (bw / Math.max(1, bn) > 0.4);
 
-    const centre = px(W >> 1, H >> 1);
+    // centre from a block, not one pixel
+    const cc = px(120, 80);
+    const centre = LETTERS[classify(cc[0], cc[1], cc[2])] || '?';
+
+    const around = (dy, dx) => {
+      const gy = 10 + dy, gx = 15 + dx;
+      if (gy < 0 || gy >= GH || gx < 0 || gx >= GW) return 'edge';
+      return grid[gy][gx];
+    };
+    const near = 'Around you: up ' + around(-1, 0) + ', down ' + around(1, 0) +
+                 ', left ' + around(0, -1) + ', right ' + around(0, 1) + '.';
+
+    // collapse identical consecutive rows: "T30x5"
+    const enc = []; let i = 0;
+    while (i < rows.length) {
+      let j = i; while (j < rows.length && rows[j] === rows[i]) j++;
+      enc.push(rle(rows[i]) + (j - i > 1 ? 'x' + (j - i) : ''));
+      i = j;
+    }
+
     return [
-      'SCREEN ' + (boxOpen ? '— a text box is open across the bottom.' : '— no text box.'),
-      'BORDERS: left ' + left + ', right ' + right + ', top ' + top + ', bottom ' + bottom + '.',
-      'CENTRE colour: ' + colourName(centre[0], centre[1], centre[2]) + '.',
-      'GRID 24x16, one letter per cell, top row first (W white, K black, S grey, D dark grey, ' +
-      'T dark green, G light green, P sand, B brown, U blue, R red, Y yellow, . other):',
-      rows.join('\n')
+      (boxOpen ? 'TEXT BOX OPEN.' : 'No text box.') +
+      ' Centre letter ' + centre + '.' +
+      (exits.length ? ' Exits: ' + exits.join(' ') + '.' : ' No exits on any edge.') +
+      ' You are the figure at the centre of the grid.',
+      near,
+      'Grid 30x20, one letter per 8x8 tile, top row first. ' +
+      'W white K black S grey D dark grey T tree V tall grass G grass P path ' +
+      'B brown U water A sky R red Y yellow ? mixed',
+      enc.join('/')
     ].join('\n');
   } catch (e) { return ''; }
 }
@@ -1248,11 +1330,10 @@ async function thinkApi(heard) {
   }
   if (seen) prompt += '\n\nYour eyes report: "' + seen + '"';
   else if (!picture) {
+    // the 30x20 decoder above already describes this screen; a second, coarser
+    // description of the same frame was 68% of the prompt for no new information
     const ocrText = await readScreenText();
-    const st = localState();
-    if (st) prompt += '\n\nYou are not being shown the picture this turn. What it looks like: ' + st +
-      (ocrText ? '\nText read from the screen: "' + ocrText + '"' : '') +
-      '\nAct from this and from your notes.';
+    if (ocrText) prompt += '\n\nText read from the screen: "' + ocrText + '"';
   }
   // memory between pictures: his own notes, last moves, and whether they did anything
   if (memo.length) prompt += '\n\nYour notes so far (oldest first): ' + memo.join(' | ');

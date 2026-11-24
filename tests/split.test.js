@@ -178,11 +178,15 @@ const check = (n, ok, extra) => { if (!ok) fails++; console.log((ok ? '  PASS ' 
   check('not every call carries the picture', without > 0,
         'with=' + withImg + ' without=' + without);
   const textOnly = calls.filter(c => !c.hasImage);
-  check('a text-only call describes the tile map',
-        textOnly.some(c => /Tile map of the screen/.test(c.text)),
+  check('a text-only call carries the decoded grid',
+        textOnly.some(c => /Grid 30x20, one letter per 8x8 tile/.test(c.text)),
         'checked ' + textOnly.length + ' text calls');
-  check('a text-only call says what is left, centre and right',
-        textOnly.some(c => /Left side: mostly/.test(c.text)));
+  check('a text-only call says what is around the player',
+        textOnly.some(c => /Around you: up \w+, down \w+, left \w+, right \w+/.test(c.text)));
+  check('a text-only call says where the player is in the grid',
+        textOnly.some(c => /figure at the centre of the grid/.test(c.text)));
+  check('a text-only call does not ship a second, coarser grid',
+        textOnly.every(c => !/Tile map of the screen/.test(c.text)));
 
   await browser.close(); server.close();
   console.log(fails ? fails + ' FAILURE(S)' : '\nall split checks passed');
