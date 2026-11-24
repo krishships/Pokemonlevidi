@@ -173,6 +173,12 @@
 
     <label>MODEL (must accept images)</label>
     <input type="text" id="model" placeholder="model id">
+
+    <div class="hint" style="margin-top:12px"><b>EYES (optional)</b> — a second model that only reads the screen.
+      Leave blank and the brain looks at the picture itself.</div>
+    <input type="text" id="eyesEndpoint" placeholder="eyes endpoint (blank = same as brain)">
+    <input type="text" id="eyesModel" placeholder="eyes model, e.g. gemini-2.0-flash">
+    <input type="password" id="eyesKey" placeholder="eyes key (blank = same as brain)" autocomplete="off">
     <div class="row">
       <button class="sm" id="listmodels">LIST MODELS</button>
     </div>
@@ -281,14 +287,16 @@ const FORMAT =
 
 const PRESETS = {
   groq:   { endpoint: 'https://api.groq.com/openai/v1/chat/completions', model: 'qwen/qwen3.8-27b' },
-  openai: { endpoint: 'https://api.openai.com/v1/chat/completions', model: 'gpt-4o-mini' }
+  openai: { endpoint: 'https://api.openai.com/v1/chat/completions', model: 'gpt-4o-mini' },
+  google: { endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', model: 'gemini-2.0-flash' }
 };
 /* the key tells you the provider; you should not have to pick a model */
 const KEYURL = {
   groq:       'https://console.groq.com/keys',
   openai:     'https://platform.openai.com/api-keys',
   openrouter: 'https://openrouter.ai/keys',
-  ollama:     'https://ollama.com/download'
+  ollama:     'https://ollama.com/download',
+  google:     'https://aistudio.google.com/apikey'
 };
 
 function showKeyUrl(provider) {
@@ -303,11 +311,15 @@ function detectProvider(key) {
   const k = String(key || '').trim();
   if (/^gsk_/.test(k)) return 'groq';
   if (/^sk-or-v1-/.test(k)) return 'openrouter';
+  if (/^AIza[0-9A-Za-z_-]{20,}/.test(k)) return 'google';
   if (/^sk-/.test(k)) return 'openai';
   return null;
 }
 
-const DEFAULTS = Object.assign({ mode: 'local', apikey: '', gap: 5, persona: DEFAULT_PERSONA }, PRESETS.groq);
+const DEFAULTS = Object.assign({
+  mode: 'local', apikey: '', gap: 5, persona: DEFAULT_PERSONA,
+  eyesEndpoint: '', eyesModel: '', eyesKey: ''      // optional second model that only reads the screen
+}, PRESETS.groq);
 const STORE = 'redexe.v1';
 let S = Object.assign({}, DEFAULTS);
 try { const raw = localStorage.getItem(STORE); if (raw) S = Object.assign(S, JSON.parse(raw)); } catch (e) {}
@@ -322,6 +334,9 @@ function paintSettings() {
   $('endpoint').value = S.endpoint;
   $('model').value = S.model;
   $('gap').value = S.gap;
+  $('eyesEndpoint').value = S.eyesEndpoint || '';
+  $('eyesModel').value = S.eyesModel || '';
+  $('eyesKey').value = S.eyesKey || '';
   $('persona').value = S.persona;
   document.querySelectorAll('.opt').forEach(o => o.classList.toggle('on', o.dataset.mode === S.mode));
   $('apibtn').textContent = S.apikey ? 'KEY OK' : 'KEY';
@@ -334,6 +349,9 @@ function collect() {
   S.endpoint = $('endpoint').value.trim() || DEFAULTS.endpoint;
   S.model = $('model').value.trim() || DEFAULTS.model;
   S.gap = Math.max(1, Math.min(60, parseFloat($('gap').value) || 5));
+  S.eyesEndpoint = $('eyesEndpoint').value.trim();
+  S.eyesModel = $('eyesModel').value.trim();
+  S.eyesKey = $('eyesKey').value.trim();
   S.persona = $('persona').value.trim() || DEFAULT_PERSONA;
 }
 function setMode(m) { S.mode = m; persist(); paintSettings(); }
@@ -625,26 +643,29 @@ $('look').addEventListener('click', async () => {
 /* =============================================================== brain */
 function apiError(msg, retryMs) { const e = new Error(msg); if (retryMs) e.retryMs = retryMs; return e; }
 
-async function callModel(userText, frame, withHistory) {
-  if (!S.apikey) throw apiError('no key');
+async function callModel(userText, frame, withHistory, ov) {
+  const EP = (ov && ov.endpoint) || S.endpoint;
+  const MODEL = (ov && ov.model) || S.model;
+  const KEY = (ov && ov.key) || S.apikey;
+  if (!KEY) throw apiError('no key');
   const useImage = !!frame && !noVision;
   const content = useImage
     ? [{ type: 'text', text: userText },
-       { type: 'image_url', image_url: Object.assign({ url: frame }, /openai\.com/.test(S.endpoint) ? { detail: 'low' } : {}) }]
+       { type: 'image_url', image_url: Object.assign({ url: frame }, /openai\.com/.test(EP) ? { detail: 'low' } : {}) }]
     : (frame ? userText + '\n(You cannot see the screen this turn.)' : userText);
-  const msgs = [{ role: 'system', content: S.persona + FORMAT }];
+  const msgs = [{ role: 'system', content: (ov && ov.system) || (S.persona + FORMAT) }];
   if (withHistory) for (const h of history.slice(-8)) msgs.push(h);
   msgs.push({ role: 'user', content });
 
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 20000);
   try {
-    const res = await fetch(S.endpoint, {
+    const res = await fetch(EP, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + S.apikey },
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + KEY },
       signal: ctrl.signal,
       body: JSON.stringify(Object.assign(
-        { model: S.model, max_tokens: 220, temperature: 0.8, messages: msgs },
+        { model: MODEL, max_tokens: 220, temperature: 0.8, messages: msgs },
         /openai\.com|groq\.com|openrouter\.ai/.test(S.endpoint || '')
           ? { response_format: { type: 'json_object' } } : {}
       ))
@@ -689,10 +710,57 @@ function heardText(heard, frame) {
   return t + '\nReply with the JSON only.';
 }
 
+let lastFrameKey = '', lastButtons = [], unstickTries = 0;
+
+/* Hash of the frame, so an unchanged screen does not cost another request. */
+function frameKey(frame) {
+  if (!frame) return '';
+  let h = frame.length;
+  for (let i = 0; i < frame.length; i += 997) h = (h * 31 + frame.charCodeAt(i)) | 0;
+  return String(h);
+}
+
+const EYES_PROMPT =
+  'You are only the eyes of a player looking at a Game Boy Advance screen. ' +
+  'Report, in under 60 words and with no advice: (1) any dialogue text, copied exactly; ' +
+  '(2) menu items visible; (3) whether a text box is open; (4) what the player is standing next to. ' +
+  'If the screen is blank or in transition, say so.';
+
+async function callEyes(frame) {
+  const ov = {
+    endpoint: S.eyesEndpoint || S.endpoint,
+    model: S.eyesModel || S.model,
+    key: S.eyesKey || S.apikey,
+    system: EYES_PROMPT
+  };
+  const r = await callModel('Describe this screen.', frame, false, ov);
+  return String(r.text || '').replace(/\s+/g, ' ').slice(0, 400);
+}
+
 async function thinkApi(heard) {
   const frame = await look();
+  const key = frameKey(frame);
+
+  // Same picture as last decision and nothing was said: the last action did
+  // nothing, so repeating it would repeat the failure. Spend no request and
+  // try a different direction instead, which is what unsticks a wall.
+  if (!heard.length && key && key === lastFrameKey) {
+    unstickTries++;
+    lastApi = 'NO CHANGE (' + unstickTries + ')';
+    if (unstickTries >= 3) { unstickTries = 0; lastFrameKey = ''; return; }  // 3 free tries, then ask again
+    const turn = ['UP', 'RIGHT', 'DOWN', 'LEFT'][unstickTries % 4];
+    await runButtons([turn, turn]);
+    return;
+  }
+  unstickTries = 0;
   const t0 = performance.now();
-  const r = await callModel(heardText(heard, frame), frame, true);
+  let seen = '';
+  if (S.eyesModel && frame) {
+    try { seen = await callEyes(frame); } catch (e) { logOnce('eyes: ' + e.message); }
+  }
+  const prompt = heardText(heard, frame) + (seen ? '\n\nYour eyes report: "' + seen + '"' : '');
+  // when a separate model did the looking, the brain gets text only
+  const r = await callModel(prompt, seen ? null : frame, true);
   const act = parseReply(r.text);
   lastApi = 'OK ' + Math.round(performance.now() - t0) + ' MS';
   history.push({ role: 'user', content: heard.length ? 'Dev: ' + heard.join(' / ') : 'Dev is silent.' },
@@ -700,6 +768,8 @@ async function thinkApi(heard) {
   if (history.length > 16) history = history.slice(-16);
   persistChat();
   if (act.say) log('him', act.say);
+  lastFrameKey = key;
+  lastButtons = act.buttons || [];
   await runButtons(act.buttons);
 }
 

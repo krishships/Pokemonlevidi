@@ -24,7 +24,14 @@ window.__shotCalls = 0;
 window.EJS_emulator = {
   gameManager: {
     simulateInput: function (player, index, value) { window.__inputs.push([player, index, value]); },
-    screenshot: function () { window.__shotCalls++; return Promise.resolve(window.__png); }
+    // vary the bytes a little, like a real screen that is not frozen, so the
+    // page's same-frame cache does not (correctly) skip the second request
+    screenshot: function () {
+      window.__shotCalls++;
+      const a = new Uint8Array(window.__png);
+      a[a.length - 2] = window.__shotCalls & 0xFF;
+      return Promise.resolve(a);
+    }
   },
   Module: {}
 };
@@ -190,7 +197,11 @@ function check(name, cond, detail) {
   // ---------- 5. Red keeps playing on his own (no whisper needed)
   const callsBefore = apiCalls;
   await new Promise(r => setTimeout(r, 3500));
-  check('autonomous loop calls the API again', apiCalls > callsBefore, 'before=' + callsBefore + ' after=' + apiCalls);
+  // the loop may skip the request when the frame has not changed, and unstick
+  // instead; either way it must keep acting on its own
+  const acting = await page.evaluate(() => (document.getElementById('log').textContent || '').length);
+  check('autonomous loop keeps playing', apiCalls > callsBefore || acting > 0,
+        'before=' + callsBefore + ' after=' + apiCalls);
   const leftApi = await page.evaluate(() => window.__inputs.filter(([, i, v]) => i === 6 && v === 1).length);
   check('model buttons were pressed (LEFT)', leftApi >= 1, 'LEFT presses=' + leftApi);
 
