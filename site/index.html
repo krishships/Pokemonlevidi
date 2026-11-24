@@ -340,7 +340,7 @@ const FORMAT =
 
 const PRESETS = {
   groq:   { endpoint: 'https://api.groq.com/openai/v1/chat/completions', model: 'qwen/qwen3.8-27b' },
-  openai: { endpoint: 'https://api.openai.com/v1/chat/completions', model: 'gpt-4o-mini' }
+  _unused: {}
 };
 /* the key tells you the provider; you should not have to pick a model */
 const KEYURL = {
@@ -365,6 +365,14 @@ function detectProvider(key) {
 
 const BUILD = '__BUILD__';        // stamped with the commit by CI
 
+/* Groq model ids look like "vendor/name". Anything shorter, or without a
+ * slash, is a typo — "z" was accepted once and produced a 404 that looked
+ * like a bad key. */
+function normaliseModel(m) {
+  const t = String(m || '').trim();
+  return (t.length >= 5 && t.indexOf('/') > 0) ? t : PRESETS.groq.model;
+}
+
 const DEFAULTS = Object.assign({
   mode: 'local', apikey: '', ocr: 'on', gap: 5, persona: DEFAULT_PERSONA,
   eyesModel: '',                                     // optional second Groq call that only reads the screen
@@ -385,6 +393,14 @@ try {
  * A stale URL kept in this browser's storage used to be sent anyway, which is
  * how a POST ended up at a static host and came back "405 Not Allowed". */
 S.endpoint = DEFAULTS.endpoint;
+{
+  const fixed = normaliseModel(S.model);
+  if (fixed !== S.model) {
+    setTimeout(() => log('sys', 'model "' + S.model + '" is not a model id. Using ' + fixed), 700);
+    S.model = fixed;
+  }
+  if (S.eyesModel && normaliseModel(S.eyesModel) !== S.eyesModel) S.eyesModel = '';
+}
 /* ?api=<url> overrides the endpoint. Useful when a provider blocks browser
  * calls and you put a small proxy in front of it. Nothing else can change it. */
 try {
@@ -421,7 +437,7 @@ if (staleEndpoint) {
 function collect() {
   S.apikey = $('apikey').value.trim();
   S.endpoint = $('endpoint').value.trim() || DEFAULTS.endpoint;
-  S.model = $('model').value.trim() || DEFAULTS.model;
+  S.model = normaliseModel($('model').value);
   S.gap = Math.max(1, Math.min(60, parseFloat($('gap').value) || 5));
   S.imgEvery = Math.max(1, Math.min(50, parseInt($('imgEvery').value, 10) || 3));
   S.eyesModel = $('eyesModel').value;
@@ -652,6 +668,7 @@ function probeMemory() {
 
 /* =============================================================== input */
 async function press(name) {
+  if (!emu) adopt();                 // the page may have been reloaded under us
   const id = BTN[name];
   if (!emu || !emu.gameManager || id === undefined) return;
   const gm = emu.gameManager;
@@ -668,7 +685,10 @@ function releaseAll() {
   pressed.clear();
 }
 async function runButtons(list) {
-  for (const b of list) { if (!awake) break; await press(b); }
+  // The action came from a live tick, so press it. Do not re-check `awake` here:
+  // that flag is the loop's business, and re-checking it silently dropped every
+  // button whenever it happened to be false for a moment.
+  for (const b of list || []) await press(b);
 }
 
 /* ================================================================ eyes */
@@ -1134,6 +1154,7 @@ async function loop() {
 }
 
 function wake() {
+  if (!emu) adopt();                    // the page may have been reloaded under us
   if (!emu) { log('sys', 'load a ROM first'); return false; }
   if (awake) return true;
   awake = true; apiFails = 0;
@@ -1163,7 +1184,15 @@ function speak() {
   box.value = '';
   log('you', text);
   pending.push(text);
-  if (!awake) { if (!wake()) pending.pop(); }
+  if (!awake) {
+    if (!wake()) {
+      // the emulator is not ready yet: keep what was said and try again, rather
+      // than dropping the whisper on the floor
+      log('sys', 'not ready yet — your message is queued, it will be heard as soon as the ROM is up');
+      const retry = setInterval(() => { if (wake()) { clearInterval(retry); nudge(); } }, 800);
+      setTimeout(() => clearInterval(retry), 60000);
+    }
+  }
   else nudge();                      // answer now, do not wait out the pause
 }
 function setFs(on) {

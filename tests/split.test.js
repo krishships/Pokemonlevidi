@@ -92,10 +92,10 @@ const check = (n, ok, extra) => { if (!ok) fails++; console.log((ok ? '  PASS ' 
   // configure: brain = groq-ish, eyes = a different model on a different endpoint
   await page.evaluate(() => {
     const s = JSON.parse(localStorage.getItem('redexe.v1') || '{}');
-    s.mode = 'api'; s.apikey = 'brain-key'; s.model = 'brain-model';
+    s.mode = 'api'; s.apikey = 'brain-key'; s.model = 'test/brain-model';
     s.endpoint = 'http://localhost:8977/v1/chat/completions';
     s.eyesEndpoint = 'http://localhost:8977/v1/chat/completions';
-    s.eyesModel = 'qwen/qwen3.8-27b'; s.gap = 1;
+    s.eyesModel = 'test/eyes-model'; s.gap = 1;
     localStorage.setItem('redexe.v1', JSON.stringify(s));
   });
   await page.goto('http://localhost:8977/?api=http://localhost:8977/v1/chat/completions',
@@ -117,11 +117,11 @@ const check = (n, ok, extra) => { if (!ok) fails++; console.log((ok ? '  PASS ' 
   });
   await sleep(1200);
   await page.evaluate(() => { const b = document.getElementById('startAI'); if (b) b.click(); });
-  await waitFor(() => calls.some(c => c.model === 'qwen/qwen3.8-27b') &&
-                      calls.some(c => c.model === 'brain-model'), 30000);
+  await waitFor(() => calls.some(c => c.model === 'test/eyes-model') &&
+                      calls.some(c => c.model === 'test/brain-model'), 30000);
 
-  const eyes = calls.filter(c => c.model === 'qwen/qwen3.8-27b');
-  const brain = calls.filter(c => c.model === 'brain-model');
+  const eyes = calls.filter(c => c.model === 'test/eyes-model');
+  const brain = calls.filter(c => c.model === 'test/brain-model');
   check('eyes model was called', eyes.length > 0, 'calls=' + calls.length);
   check('eyes model received the picture', eyes.some(c => c.hasImage));
   check('brain model was called', brain.length > 0);
@@ -133,7 +133,7 @@ const check = (n, ok, extra) => { if (!ok) fails++; console.log((ok ? '  PASS ' 
   await page.evaluate(() => {
     const st = JSON.parse(localStorage.getItem('redexe.v1') || '{}');
     st.eyesModel = ''; st.eyesEndpoint = ''; st.eyesKey = '';   // one model only
-    st.model = 'brain-model'; st.imgEvery = 3; st.gap = 1;
+    st.model = 'test/brain-model'; st.imgEvery = 3; st.gap = 1;
     localStorage.setItem('redexe.v1', JSON.stringify(st));
   });
   await page.goto('http://localhost:8977/?api=http://localhost:8977/v1/chat/completions',
