@@ -4,7 +4,7 @@
 Catches a build that produced a .gba which is malformed and would fail on
 hardware, before it is uploaded as an artifact.
 
-    python3 tools/romcheck.py dist/heart-and-soul.gba
+    python3 tools/romcheck.py dist/emerald.gba
 
 Checks: size is a multiple of 1024, the header checksum at 0xBD matches the
 complement of the 29 header bytes at 0xA0..0xBC, the title is printable, and
