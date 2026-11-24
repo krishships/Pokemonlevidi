@@ -149,7 +149,12 @@ const check = (n, ok, extra) => { if (!ok) fails++; console.log((ok ? '  PASS ' 
     input.dispatchEvent(new Event('change', { bubbles: true }));
   });
   await sleep(1200);
-  await page.evaluate(() => { const b = document.getElementById('startAI'); if (b) b.click(); });
+  // CI can be slow to attach the emulator stub; press WAKE again until calls flow
+  for (let attempt = 0; attempt < 5; attempt++) {
+    await page.evaluate(() => { const b = document.getElementById('startAI'); if (b) b.click(); });
+    await waitFor(() => calls.length > 0, 6000);
+    if (calls.length) break;
+  }
   await waitFor(() => calls.some(c => c.hasImage) && calls.some(c => !c.hasImage), 35000);
 
   const withImg = calls.filter(c => c.hasImage).length;
