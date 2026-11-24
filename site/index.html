@@ -308,6 +308,35 @@ function tap(button) {
   return true;
 }
 
+/* a cheap fingerprint of the frame, to tell "moved" from "walked into a wall" */
+async function frameHash() {
+  if (!emu || !emu.gameManager || !emu.gameManager.screenshot) return null;
+  try {
+    const b = await emu.gameManager.screenshot();
+    if (!b || !b.length) return null;
+    let h = b.length;
+    for (let i = 0; i < b.length; i += 97) h = (h * 31 + b[i]) | 0;
+    return h;
+  } catch (e) { return null; }
+}
+
+const NEXT_DIR = { up: 'right', right: 'down', down: 'left', left: 'up' };
+
+/* walk one direction, but if the screen does not change we are against a wall:
+   turn and try the next one instead of grinding into it forever */
+async function walkSmart(dir, steps) {
+  let d = dir;
+  for (let i = 0; i < steps; i++) {
+    const before = await frameHash();
+    await new Promise(r => { ACT[d] ? ACT[d](1) : null; setTimeout(r, 260); });
+    const after = await frameHash();
+    if (before !== null && after !== null && before === after) {
+      d = NEXT_DIR[d] || 'up';
+    }
+  }
+  return d;
+}
+
 const ACT = {
   up:    (n) => hold('UP', n * 140),
   down:  (n) => hold('DOWN', n * 140),
@@ -320,8 +349,13 @@ const ACT = {
 };
 
 function perform(intent, steps) {
+  const n = Math.max(1, Math.min(8, steps || 1));
+  if (['up', 'down', 'left', 'right'].includes(intent)) {
+    walkSmart(intent, n);            // turns itself when it hits a wall
+    return;
+  }
   const fn = ACT[intent] || ACT.wait;
-  try { fn(Math.max(1, Math.min(8, steps || 1))); } catch (e) {}
+  try { fn(n); } catch (e) {}
 }
 
 /* ================================================================ eyes */
