@@ -109,6 +109,7 @@
   <button class="btn" id="startAI">Wake him</button>
   <button class="btn" id="stopAI">Rest</button>
   <button class="btn" id="look">Look</button>
+  <button class="btn btn--gold" id="apibtn">Add API key</button>
 </div>
 
 <div id="status">not connected</div>
@@ -185,6 +186,8 @@ function paintSettings() {
   $('model').value = S.model;
   $('persona').value = S.persona;
   document.querySelectorAll('.opt').forEach(o => o.classList.toggle('on', o.dataset.mode === S.mode));
+  const ab = document.getElementById('apibtn');
+  if (ab) ab.textContent = S.apikey ? 'API key ✓' : 'Add API key';
   $('modeLabel').textContent = S.mode === 'api'
     ? (S.apikey ? 'api brain · ready' : 'api brain · no key')
     : 'local brain';
@@ -381,6 +384,12 @@ function probeMemory() {
   log('sys', 'raw memory readable · ' + size + ' bytes');
   paintStatus();
 }
+
+$('apibtn').addEventListener('click', () => {
+  $('settings').open = true;
+  $('settings').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  setTimeout(() => $('apikey').focus(), 350);
+});
 
 $('look').addEventListener('click', async () => {
   const f = await look();
