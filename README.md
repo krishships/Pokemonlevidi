@@ -1,7 +1,6 @@
 # RED.EXE — an AI plays, you talk to him
 
-Pokemon Red (Game Boy) or Emerald (GBA), built from the public decompilations,
-plus a page that runs the ROM and puts an AI in the driver's seat. A cartridge has
+A web page that runs a Game Boy or GBA ROM you supply and puts an AI in the driver's seat. A cartridge has
 no network, so the brain lives in the browser: it reads the screen, presses the
 buttons, and talks to you. You are Dev, an NPC he can hear.
 
@@ -10,8 +9,8 @@ buttons, and talks to you. You are Dev, an NPC he can hear.
 This repo does **not** build or ship a ROM. You supply one: a Pokémon Emerald
 `.gba` you own, dropped into the page with **LOAD ROM**.
 
-If you put `emerald.gba` next to `site/index.html` (or in `site/roms/`), the
-page finds and loads it automatically. `.gitignore` keeps ROMs out of git, so
+If you put `emerald.gba` next to `site/index.html` (or in `site/roms/`) when running locally, the
+page finds and loads it automatically. Never deploy a folder that contains a ROM. `.gitignore` keeps ROMs out of git, so
 a ROM never lands in the repository by accident.
 
 The AI is not in the ROM — a Game Boy Advance has no network. The brain is the
@@ -24,33 +23,26 @@ web page, which runs the ROM and presses its buttons.
 site/index.html        the page: emulator, AI loop, settings, save/reset
 gba/emerald_bridge.lua mGBA Lua bridge: memory reads and button input
 gba/emerald.py         driver for that bridge (position, map, party)
-tests/pure.test.js     unit tests for the parsing and local brain
-tests/ui.test.js       headless browser test of the page
-.github/workflows/     page test · pages deploy
+tests/*.test.js        unit, UI, two-model and smoke tests
+.github/workflows/     page tests · pages deploy
 ```
 
-## The two halves
+## The AI
 
-**The ROM** is built from the public decompilations. CI produces `emerald-gba`
-(plus `pokeemerald.map`, which lists every memory address for later) and `red-gb`
-(Pokemon Red with the patched Oak intro).
+`site/index.html` runs the ROM in the browser and puts an AI in the driver's seat.
+Red starts as a newcomer who knows nothing of the world. Load a ROM, then:
 
-**The AI** is `site/index.html`, styled like the Red/Blue text boxes. Load a ROM, then:
-
-- **he plays by himself.** While awake, Red looks at the screen every few seconds,
-  the model answers with a short line and 1 to 12 button presses, and the page
-  presses them. No random walking in API mode.
+- **he plays by himself.** He looks at the screen every few seconds; the model answers with a short line, a note to himself and 1 to 12 button presses.
+- **pictures are rationed.** The real picture goes on every Nth call, when you speak, when the scene changes or when he is stuck. Other turns get a free text description plus his own last notes and moves.
 - **you are Dev, an NPC he can hear.** Type in the box; it reaches him on his next turn.
-- **he remembers** the last few exchanges.
-- **he knows the secret:** his persona says he came from programming. Edit it freely.
-- **if the screen stops changing,** the next prompt tells him he is blocked or in a text box.
+- **FORGET** wipes his notes and chat memory.
 
 ## Using the API (Groq, OpenAI, or any OpenAI-compatible endpoint)
 
 Open **KEY / BRAIN / RED**:
 
-1. Tap **GROQ** (or OPENAI) to fill endpoint and model.
-2. Paste your key. Tap **LIST MODELS** and put a model that accepts images in MODEL.
+1. Tap **GROQ** to fill the endpoint and model.
+2. Paste your Groq key (`gsk_...`). Tap **LIST MODELS** and type a model that accepts images into MODEL.
 3. Tap **SAVE**. A newly added key switches the brain to API.
 4. Press **TEST AI**. It shows the exact error (HTTP code, CORS, no vision) if anything is wrong.
 5. Press **WAKE RED**.
@@ -66,7 +58,7 @@ Free plans have rate limits: raise "seconds between moves" if you see 429.
 - **Vision is screenshots, not memory.** The shipped EmulatorJS cores do not export
   `retro_get_memory_data`, so he reads pixels, not RAM.
 - **One ROM per page visit.** Reload the page to switch games.
-- **Emerald's opening truck room** traps a pixel-only bot. Use Red for testing.
+- **Emerald's opening truck room** can trap a pixel-only bot.
 
 ## Run locally
 
@@ -82,17 +74,8 @@ the EmulatorJS CDN on first run.
 
 ## Licences
 
-Code here: MIT. No ROM images or ripped assets are in this repository —
-the game is compiled from the public decompilation at build time. Pokémon is
+Code here: MIT. No ROM images or ripped assets are in this repository. Pokémon is
 © Nintendo / Creatures / GAME FREAK. See `docs/LEGAL.md`.
-
-## Get the latest Emerald ROM (no ROM needed)
-
-Actions > **Build latest Emerald** > Run workflow. Choose `pokeemerald-expansion`
-(the "EE" base) or plain `pokeemerald`, and a branch (`master` is newest). It
-compiles the ROM from source and uploads `emerald.gba` and `emerald.map` as the
-`emerald-latest` artifact (kept 3 days). Keep this repo private: a built ROM
-contains Nintendo's assets and should not be shared.
 
 ## Full screen
 

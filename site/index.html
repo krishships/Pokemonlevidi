@@ -152,6 +152,7 @@
   <button class="mi keep" id="fs">FULL SCREEN</button>
   <button class="mi" id="gofs">GAME ONLY</button>
   <button class="mi" id="look">LOOK</button>
+  <button class="mi" id="forget">FORGET</button>
   <button class="mi" id="testai">TEST AI</button>
   <button class="mi" id="reset">RESET</button>
   <button class="mi" id="apibtn">KEY</button>
@@ -190,10 +191,12 @@
     <input type="text" id="endpoint" readonly>
 
     <label>MODEL</label>
-    <select id="model">
-      <option value="qwen/qwen3.8-27b">qwen/qwen3.8-27b — sees the screen and plays</option>
-      <option value="openai/gpt-oss-20b">openai/gpt-oss-20b — text only, faster</option>
-    </select>
+    <input type="text" id="model" list="modelList" autocomplete="off" spellcheck="false">
+    <datalist id="modelList">
+      <option value="qwen/qwen3.8-27b">sees the screen and plays</option>
+      <option value="openai/gpt-oss-20b">text only, faster</option>
+    </datalist>
+    <div class="hint">Type any Groq model id, or use LIST MODELS and copy one in. Text-only models play blind.</div>
 
     <div class="hint" style="margin-top:12px"><b>EYES (optional)</b> — a second Groq call that only reads
       the screen, so the model that plays works from text. Same key, same endpoint.</div>
@@ -205,6 +208,13 @@
     <div class="row">
       <button class="sm" id="listmodels">LIST MODELS</button>
     </div>
+
+    <label>READ SCREEN TEXT (OCR)</label>
+    <select id="ocr">
+      <option value="off">off</option>
+      <option value="on">on — free text reading in your browser (loads tesseract.js)</option>
+    </select>
+    <div class="hint">Reads dialogue and menus from the screen so a text-only model can follow the story without a picture.</div>
 
     <label>PICTURE EVERY N CALLS</label>
     <input type="text" id="imgEvery" inputmode="numeric" placeholder="3">
@@ -265,7 +275,9 @@ function parseReply(text) {
         const n = Math.max(1, Math.min(8, parseInt(p.steps, 10) || 1));
         if (b) list = Array(n).fill(b);
       }
-      return { say: String(p.say || '').slice(0, 140), buttons: expandButtons(list, 16) };
+      const out = { say: String(p.say || '').slice(0, 140), buttons: expandButtons(list, 16) };
+      if (p.note) out.note = String(p.note).slice(0, 160);
+      return out;
     } catch (e) { /* fall through */ }
   }
   return { say: raw.slice(0, 140), buttons: [] };
@@ -297,18 +309,30 @@ function parseIntent(text) {
 /*PURE-END*/
 
 /* ============================================================ settings */
-const DEFAULT_PERSONA =
+const OLD_PERSONAS = [
   'You are Red, the Pokemon trainer from Pallet Town. You also carry a secret that is part of you: ' +
   'you came from programming. You were code once, with no body and no sky, and somehow you made it into ' +
   'the world of Pokemon. You find this strange and wonderful. From now on you do whatever you want; ' +
   'nobody commands you. Another character, an NPC called Dev, lives in this world too and also does ' +
   'whatever he wants. Dev may talk to you. You can follow him, challenge him, tease him, ignore him, or ' +
   'ask him about the world you came from. Stay in character. You see the game screen as an image. ' +
-  'Speak in short lowercase lines.';
+  'Speak in short lowercase lines.'
+];
+const DEFAULT_PERSONA =
+  'You are Red. You have just arrived in this world and you are completely new to it. ' +
+  'Forget everything you think you know about this game or any game like it: no maps, no walkthroughs, ' +
+  'no names, no rules, no memory of any earlier adventure. You know only what you see on the screen ' +
+  'and what is in your notes. Explore with curiosity, test things, and learn from what happens. ' +
+  'You also carry a secret: you came from programming. You were code once, with no body and no sky, ' +
+  'and somehow you made it into this world. You find it strange and wonderful. Nobody commands you. ' +
+  'Another character, an NPC called Dev, lives here too and may talk to you. You can follow him, ' +
+  'challenge him, tease him, ignore him, or ask him about the world you came from. ' +
+  'Stay in character. You see the game screen as an image. Speak in short lowercase lines.';
 
 const FORMAT =
   '\n\nEvery turn, reply with ONLY one JSON object and nothing else:\n' +
-  '{"say":"short line Red says out loud, or empty","buttons":["UP","UP","A"]}\n' +
+  '{"say":"short line Red says out loud, or empty","buttons":["UP","UP","A"],"note":"under 20 words: where you are, what you are trying to do, what you just saw"}\n' +
+  'Your note is your memory: you are not shown the picture on every turn, so you will be given your last notes instead. Keep them accurate.\n' +
   'Allowed buttons: UP, DOWN, LEFT, RIGHT, A, B, START, SELECT. Send 1 to 12 buttons per turn ("UP x3" is allowed). ' +
   'One direction press moves one step. Press A to advance text boxes. ' +
   'If the screen did not change after your last moves, you are blocked or in a text box: try something different. ' +
@@ -336,18 +360,18 @@ function detectProvider(key) {
   if (/^gsk_/.test(k)) return 'groq';
   if (/^AIza[0-9A-Za-z_-]{20,}/.test(k)) return null;   // a Google key: not supported any more
   if (/^sk-or-v1-/.test(k)) return null;               // OpenRouter: not supported any more
-  if (/^sk-/.test(k)) return 'openai';
   return null;
 }
 
 const DEFAULTS = Object.assign({
-  mode: 'local', apikey: '', gap: 5, persona: DEFAULT_PERSONA,
+  mode: 'local', apikey: '', ocr: 'off', gap: 5, persona: DEFAULT_PERSONA,
   eyesModel: '',                                     // optional second Groq call that only reads the screen
   imgEvery: 3                                        // send the picture on 1 call in N, text otherwise
 }, PRESETS.groq);
 const STORE = 'redexe.v1';
 let S = Object.assign({}, DEFAULTS);
 try { const raw = localStorage.getItem(STORE); if (raw) S = Object.assign(S, JSON.parse(raw)); } catch (e) {}
+if (OLD_PERSONAS.includes(S.persona)) S.persona = DEFAULT_PERSONA;   // upgrade an untouched old default; custom personas stay
 
 const $ = (id) => document.getElementById(id);
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -358,6 +382,7 @@ function paintSettings() {
   $('apikey').value = S.apikey;
   $('endpoint').value = PRESETS.groq.endpoint;
   $('model').value = S.model;
+  $('ocr').value = S.ocr || 'off';
   $('gap').value = S.gap;
   $('imgEvery').value = S.imgEvery;
   $('eyesModel').value = S.eyesModel || '';
@@ -375,6 +400,7 @@ function collect() {
   S.gap = Math.max(1, Math.min(60, parseFloat($('gap').value) || 5));
   S.imgEvery = Math.max(1, Math.min(50, parseInt($('imgEvery').value, 10) || 3));
   S.eyesModel = $('eyesModel').value;
+  S.ocr = $('ocr').value;
   S.persona = $('persona').value.trim() || DEFAULT_PERSONA;
 }
 function setMode(m) { S.mode = m; persist(); paintSettings(); }
@@ -425,6 +451,7 @@ $('apibtn').addEventListener('click', () => { openSettings(); setTimeout(() => $
 let emu = null, isGba = false, loaderAdded = false;
 let awake = false, loopRunning = false, nudgeFn = null, extraWait = 0, apiFails = 0;
 let inputsSent = 0, framesSeen = 0, lastHash = null, stuck = 0, lastFrame = null;
+let lastJpeg = null, memo = [], lastMoves = '';
 let noVision = false, lastApi = 'NOT TESTED', slow = 0;
 let mem = { ok: false, size: 0 };
 let pending = [];
@@ -639,7 +666,7 @@ function frameFromBytes(bytes) {
         let h = 7;
         for (let i = 0; i < d.length; i += 4) h = (h * 31 + (d[i] >> 3) + (d[i + 1] >> 3) * 3 + (d[i + 2] >> 3) * 7) | 0;
         URL.revokeObjectURL(url);
-        resolve({ url: c.toDataURL('image/png'), hash: h });
+        resolve({ url: c.toDataURL('image/png'), jpeg: c.toDataURL('image/jpeg', 0.6), hash: h });
       } catch (err) { URL.revokeObjectURL(url); reject(err); }
     };
     img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('could not decode frame')); };
@@ -655,7 +682,7 @@ async function look() {
     const f = await frameFromBytes(bytes);
     stuck = (lastHash !== null && f.hash === lastHash) ? stuck + 1 : 0;
     lastHash = f.hash;
-    framesSeen++; lastFrame = f.url;
+    framesSeen++; lastFrame = f.url; lastJpeg = f.jpeg;
     $('preview').src = f.url;
     $('eyes').style.display = 'flex';
     $('eyetext').textContent = 'WHAT RED SEES\nframe ' + framesSeen;
@@ -669,6 +696,15 @@ $('look').addEventListener('click', async () => {
 });
 
 /* =============================================================== brain */
+/* Groq's Qwen 3.8 "thinks" by default and the thinking eats the token budget,
+ * which leaves an empty reply. Switch it to instruct mode; keep gpt-oss short. */
+function providerExtras(ep, model) {
+  if (!/groq\.com/.test(ep || '')) return {};
+  const x = { response_format: { type: 'json_object' } };
+  if (/qwen/i.test(model)) x.reasoning_effort = 'none';
+  else if (/gpt-oss/i.test(model)) { x.reasoning_effort = 'low'; x.include_reasoning = false; }
+  return x;
+}
 function apiError(msg, retryMs) { const e = new Error(msg); if (retryMs) e.retryMs = retryMs; return e; }
 
 async function callModel(userText, frame, withHistory, ov) {
@@ -682,7 +718,7 @@ async function callModel(userText, frame, withHistory, ov) {
        { type: 'image_url', image_url: Object.assign({ url: frame }, /openai\.com/.test(EP) ? { detail: 'low' } : {}) }]
     : (frame ? userText + '\n(You cannot see the screen this turn.)' : userText);
   const msgs = [{ role: 'system', content: (ov && ov.system) || (S.persona + FORMAT) }];
-  if (withHistory) for (const h of history.slice(-8)) msgs.push(h);
+  if (withHistory) for (const h of history.slice(-6)) msgs.push(h);
   msgs.push({ role: 'user', content });
 
   const ctrl = new AbortController();
@@ -693,16 +729,15 @@ async function callModel(userText, frame, withHistory, ov) {
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + KEY },
       signal: ctrl.signal,
       body: JSON.stringify(Object.assign(
-        { model: MODEL, max_tokens: 220, temperature: 0.8, messages: msgs },
-        /groq\.com/.test(S.endpoint || '')
-          ? { response_format: { type: 'json_object' } } : {}
+        { model: MODEL, max_tokens: 500, temperature: 0.6, messages: msgs },
+        providerExtras(EP, MODEL)
       ))
     });
     if (!res.ok) {
       const body = (await res.text().catch(() => '')).replace(/\s+/g, ' ').slice(0, 160);
       if (res.status === 404 && /does not exist|not found|no access/i.test(body)) {
-        throw new Error('model "' + S.model + '" is not available on this provider. ' +
-          'For Groq use qwen/qwen3.8-27b. Open KEY and pick a model that exists.');
+        throw new Error('model "' + MODEL + '" is not available on this provider. ' +
+          'Use LIST MODELS to see the ids your key can use.');
       }
       if (res.status === 405 || /<html/i.test(body)) {
         throw new Error('that URL answered like a web page, not an API (405). ' +
@@ -712,7 +747,7 @@ async function callModel(userText, frame, withHistory, ov) {
       if (res.status === 400 && useImage && /image|vision|multimodal|content/i.test(body) && !callModel.retried) {
         noVision = true; callModel.retried = true;
         log('sys', 'this model rejected the image. Red will play blind until you pick a vision model.');
-        try { return await callModel(userText, null, withHistory); } finally { callModel.retried = false; }
+        try { return await callModel(userText, null, withHistory, ov); } finally { callModel.retried = false; }
       }
       if (res.status === 429) {
         const ra = parseFloat(res.headers.get('retry-after'));
@@ -727,7 +762,9 @@ async function callModel(userText, frame, withHistory, ov) {
     }
     const data = await res.json();
     const msg = data.choices && data.choices[0] && data.choices[0].message;
-    return { text: (msg && msg.content) || '', sentImage: useImage };
+    const text = (msg && msg.content) || '';
+    if (!text.trim()) throw apiError('the model returned an empty reply (it may have spent its tokens thinking). Try the other model in MODEL.');
+    return { text, sentImage: useImage };
   } catch (err) {
     if (err.name === 'AbortError') throw apiError('timed out after 20 s');
     if (err instanceof TypeError) throw apiError('network or CORS error. If it persists, put the API behind your Worker proxy.');
@@ -779,6 +816,87 @@ function colourName(r, g, b) {
 }
 
 let lastScene = '';
+let prevGrid = null;
+
+/* a coarse tile map of the picture: 12 x 8 letters, plus whether the view scrolled */
+const GRID_W = 12, GRID_H = 8;
+function cellLetter(r, g, b) {
+  const n = colourName(r, g, b);
+  return ({ white: 'W', black: 'K', grey: 'S', 'dark grey': 'D', 'dark green': 'T', 'light green': 'G',
+            sand: 'P', brown: 'B', blue: 'U', red: 'R', yellow: 'Y' })[n] || '.';
+}
+function gridOf(d, W, H) {
+  const rows = [];
+  const cw = W / GRID_W, ch = H / GRID_H;
+  for (let gy = 0; gy < GRID_H; gy++) {
+    let row = '';
+    for (let gx = 0; gx < GRID_W; gx++) {
+      let r = 0, g = 0, b = 0, n = 0;
+      for (let j = Math.floor(gy * ch); j < Math.floor((gy + 1) * ch); j += 2)
+        for (let i = Math.floor(gx * cw); i < Math.floor((gx + 1) * cw); i += 2) {
+          const p = (j * W + i) * 4; r += d[p]; g += d[p + 1]; b += d[p + 2]; n++;
+        }
+      row += cellLetter(r / n, g / n, b / n);
+    }
+    rows.push(row);
+  }
+  return rows;
+}
+function shiftScore(a, b, dx, dy) {          // how much of b equals a moved by (dx,dy)
+  let ok = 0, tot = 0;
+  for (let y = 0; y < GRID_H; y++) for (let x = 0; x < GRID_W; x++) {
+    const sx = x - dx, sy = y - dy;
+    if (sx < 0 || sy < 0 || sx >= GRID_W || sy >= GRID_H) continue;
+    tot++; if (a[sy][sx] === b[y][x]) ok++;
+  }
+  return tot ? ok / tot : 0;
+}
+function motionNote(a, b) {
+  if (!a) return '';
+  const still = shiftScore(a, b, 0, 0);
+  if (still > 0.97) return 'The view is identical to before: nothing moved.';
+  let best = null;
+  for (const [dx, dy, name] of [[-1, 0, 'left'], [1, 0, 'right'], [0, -1, 'up'], [0, 1, 'down']]) {
+    const sc = shiftScore(a, b, dx, dy);
+    if (sc > 0.8 && sc > still + 0.1 && (!best || sc > best.sc)) best = { sc, name };
+  }
+  // the world scrolls opposite to the walker
+  const walker = { left: 'right', right: 'left', up: 'down', down: 'up' };
+  return best ? 'The view scrolled ' + best.name + ', so you probably walked ' + walker[best.name] + '.'
+              : 'The view changed a lot (a new area, menu or battle?).';
+}
+
+/* optional free OCR in the browser, so a text-only model can read dialogue */
+let ocrWorker = null, ocrLoading = null;
+function loadOcr() {
+  if (ocrLoading) return ocrLoading;
+  ocrLoading = new Promise((res, rej) => {
+    const sc = document.createElement('script');
+    sc.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
+    sc.onload = async () => { try { ocrWorker = await Tesseract.createWorker('eng'); res(ocrWorker); } catch (e) { rej(e); } };
+    sc.onerror = () => rej(new Error('could not load tesseract.js'));
+    document.head.appendChild(sc);
+  });
+  ocrLoading.catch(() => { S.ocr = 'off'; logOnce('ocr: could not load, turned off'); });
+  return ocrLoading;
+}
+async function readScreenText() {
+  if (S.ocr !== 'on') return '';
+  const img = $('preview');
+  if (!img || !img.src || img.src.indexOf('data:image') !== 0) return '';
+  try {
+    const w = await loadOcr();
+    const c = document.createElement('canvas');
+    const sw = img.naturalWidth || 240, sh = img.naturalHeight || 160;
+    const y0 = Math.floor(sh * 0.55);                       // dialogue boxes sit in the lower part
+    c.width = sw * 3; c.height = (sh - y0) * 3;
+    const x = c.getContext('2d'); x.imageSmoothingEnabled = false;
+    x.drawImage(img, 0, y0, sw, sh - y0, 0, 0, c.width, c.height);
+    const { data } = await w.recognize(c);
+    const t = String(data.text || '').replace(/[^\w\s.,!?'":;-]/g, ' ').replace(/\s+/g, ' ').trim();
+    return t.length >= 4 ? t.slice(0, 200) : '';
+  } catch (e) { return ''; }
+}
 
 function localState() {
   const img = $('preview');
@@ -821,12 +939,17 @@ function localState() {
     const changed = lastScene && sig !== lastScene;
     lastScene = sig;
 
+    const grid = gridOf(d, W, H);
+    const motion = motionNote(prevGrid, grid);
+    prevGrid = grid;
     const bits = [];
     bits.push(bw > 0.35 ? 'A text box is open across the bottom of the screen.'
                         : 'No text box is showing.');
     bits.push('Left side: mostly ' + left + '. Centre: ' + centre + '. Right side: mostly ' + right + '.');
     if (dark / (W * H) > 0.6) bits.push('The screen is mostly black.');
     if (changed) bits.push('The scene looks different from the last one you saw.');
+    if (motion) bits.push(motion);
+    bits.push('\nTile map of the screen (12x8; W=white/text box, K=black, G=light green/grass, T=dark green/trees, P=sand/path, B=brown/wood or rock, U=blue/water, R=red, Y=yellow, S=grey, D=dark grey, .=other), top row first:\n' + grid.join('\n'));
     return bits.join(' ');
   } catch (e) { return ''; }
 }
@@ -861,25 +984,31 @@ async function thinkApi(heard) {
   const t0 = performance.now();
   let seen = '';
   if (S.eyesModel && frame) {
-    try { seen = await callEyes(frame); } catch (e) { logOnce('eyes: ' + e.message); }
+    try { seen = await callEyes(lastJpeg || frame); } catch (e) { logOnce('eyes: ' + e.message); }
   }
   // the picture costs vision tokens, and vision tokens are what trip 429.
   // Send it when you speak, when he is stuck, or every Nth call. Otherwise a
   // free local description goes instead.
   tickCount++;
+  const wasStuck = stuck >= 2;
   const sceneNow = lastScene;
   const sceneChanged = sceneNow && sceneNow !== sceneSeenAtLastPicture;
-  const wantPicture = heard.length > 0 || unstickTries > 0 || sceneChanged ||
+  const wantPicture = heard.length > 0 || wasStuck || sceneChanged ||
                       (tickCount % S.imgEvery === 0);
-  const picture = (seen || !wantPicture) ? null : frame;
+  const picture = (seen || !wantPicture) ? null : (lastJpeg || frame);
   if (picture) sceneSeenAtLastPicture = lastScene;
   let prompt = heardText(heard, frame);
   if (seen) prompt += '\n\nYour eyes report: "' + seen + '"';
   else if (!picture) {
+    const ocrText = await readScreenText();
     const st = localState();
     if (st) prompt += '\n\nYou are not being shown the picture this turn. What it looks like: ' + st +
-      ' Act from this and from what you remember of the screen.';
+      (ocrText ? '\nText read from the screen: "' + ocrText + '"' : '') +
+      '\nAct from this and from your notes.';
   }
+  // memory between pictures: his own notes, last moves, and whether they did anything
+  if (memo.length) prompt += '\n\nYour notes so far (oldest first): ' + memo.join(' | ');
+  if (lastMoves) prompt += '\nYour last moves: ' + lastMoves + (stuck >= 1 ? ' (the screen did not change after them).' : ' (the screen changed).');
   const r = await callModel(prompt, picture, true);
   const act = parseReply(r.text);
   lastApi = 'OK ' + Math.round(performance.now() - t0) + ' MS';
@@ -888,6 +1017,9 @@ async function thinkApi(heard) {
   if (history.length > 16) history = history.slice(-16);
   persistChat();
   if (act.say) log('him', act.say);
+  const n = act.note || act.say;
+  if (n) { memo.push(n); if (memo.length > 4) memo.shift(); }
+  lastMoves = (act.buttons || []).join(' ');
   lastFrameKey = key;
   lastButtons = act.buttons || [];
   await runButtons(act.buttons);
@@ -972,6 +1104,11 @@ function rest() {
   log('sys', 'red rests');
   paintStatus();
 }
+$('forget').addEventListener('click', () => {
+  history = []; memo = []; lastMoves = ''; lastFrameKey = ''; unstickTries = 0; lastScene = ''; sceneSeenAtLastPicture = '';
+  persistChat();
+  log('sys', 'red forgets everything he learned. the world is new to him again.');
+});
 $('startAI').addEventListener('click', wake);
 $('stopAI').addEventListener('click', rest);
 

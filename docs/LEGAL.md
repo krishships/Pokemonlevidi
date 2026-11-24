@@ -8,34 +8,21 @@ This is a non-commercial fan project. Read this before adding any file.
 - Save files, save states, or emulator states.
 - Ripped graphics, fonts, music, sound effects, cries, or map data from
   Nintendo / GAME FREAK / Creatures titles.
-- Ripped assets from Hollow Knight or any other commercial game
-  (© Team Cherry), or from a fan project that ships such assets.
 - Patch files (`.bps`, `.ips`, `.ups`) that contain the above.
 
-`.gitignore` blocks the common extensions; CI fails on any binary over 2 MB that
-is not in an allowlist, so an accidental `git add` of a ROM does not land.
+`.gitignore` blocks the common ROM, save and patch extensions.
 
-**Bring your own ROM.** Every contributor builds locally against a base ROM
-they dumped from a cartridge they own. The build script reads it from
-`base/pokeemerald/pokeemerald.gba`, which is git-ignored.
+## Bring your own ROM
+
+You load a ROM you dumped from a cartridge you own, with **LOAD ROM**. It is kept
+only in your browser (IndexedDB) and is never uploaded anywhere. Do not place a ROM
+in `site/` on any public deployment.
 
 ## What is fine here
 
-- Original C code (MIT).
-- Original boss designs, stats and attack tables authored for this project.
-- Original art, music and text created for the hack.
-- Behavioural references to other games: "this attack should feel like a
-  telegraphed overhead slam" is a design note, not an asset.
-
-## Referenced fan projects
-
-`data/boss_sources.json` lists the open-source fan projects consulted for
-*mechanics understanding*. None of them are vendored, and their assets are not
-used. Their licences vary — `HK3DS` is MIT for code only, `hallowdale` is MIT
-code with CC BY-NC assets, `hollow_nes` has no explicit licence. Anything with
-no clear licence is reference-only and cannot be imported, which is what
-`tools/import_bosses.py` enforces.
+- Original code (MIT).
+- Original text and design written for this project.
 
 ## If you are a rights holder
 
-Open an issue and the offending file will be removed. No argument needed.
+Open an issue and the offending file will be removed.

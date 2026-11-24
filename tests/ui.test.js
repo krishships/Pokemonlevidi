@@ -11,7 +11,7 @@ const { execSync } = require('child_process');
  * wrapper that never prints a devtools URL. Prefer puppeteer's own binary. */
 function findChrome(puppeteer) {
   if (process.env.CHROME_PATH) return process.env.CHROME_PATH;
-  try { const p = puppeteer.executablePath(); if (p && fs.existsSync(p)) return p; } catch (e) {}
+  try { const p = puppeteer.executablePath(); if (typeof p === 'string' && fs.existsSync(p)) return p; } catch (e) {}
   try { return execSync('which chromium || which google-chrome || which chromium-browser')
             .toString().trim().split('\n')[0]; } catch (e) {}
   return undefined;
@@ -68,7 +68,7 @@ function check(name, cond, detail) {
   await new Promise(r => server.listen(PORT, r));
 
   let chrome = '';
-  try { chrome = puppeteer.executablePath(); } catch (e) {}
+  chrome = process.env.CHROME_PATH || '';
   if (!chrome || !fs.existsSync(chrome)) {
     chrome = execSync('which chromium || which chromium-browser || which google-chrome')
       .toString().trim().split('\n')[0];

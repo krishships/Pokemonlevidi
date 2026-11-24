@@ -8,7 +8,7 @@ const { execSync } = require('child_process');
  * wrapper that never prints a devtools URL. Prefer puppeteer's own binary. */
 function findChrome(puppeteer) {
   if (process.env.CHROME_PATH) return process.env.CHROME_PATH;
-  try { const p = puppeteer.executablePath(); if (p && fs.existsSync(p)) return p; } catch (e) {}
+  try { const p = puppeteer.executablePath(); if (typeof p === 'string' && fs.existsSync(p)) return p; } catch (e) {}
   try { return execSync('which chromium || which google-chrome || which chromium-browser')
             .toString().trim().split('\n')[0]; } catch (e) {}
   return undefined;
@@ -31,7 +31,8 @@ const server = http.createServer((q, r) => {
     q.on('end', () => {
       const j = JSON.parse(body || '{}');
       const hasImage = JSON.stringify(j.messages || []).includes('image_url');
-      calls.push({ model: j.model, hasImage });
+      const text = JSON.stringify(j.messages || []);
+      calls.push({ model: j.model, hasImage, text });
       const content = j.model === 'eyes-model'
         ? 'Dialogue box open: MOM says AAAA we are here hon. Player stands next to the truck.'
         : JSON.stringify({ say: 'mom is talking, press A', buttons: ['A'] });
@@ -140,6 +141,12 @@ const check = (n, ok, extra) => { if (!ok) fails++; console.log((ok ? '  PASS ' 
   check('some calls carry the picture', withImg > 0, 'with=' + withImg);
   check('not every call carries the picture', without > 0,
         'with=' + withImg + ' without=' + without);
+  const textOnly = calls.filter(c => !c.hasImage);
+  check('a text-only call describes the tile map',
+        textOnly.some(c => /Tile map of the screen/.test(c.text)),
+        'checked ' + textOnly.length + ' text calls');
+  check('a text-only call says what is left, centre and right',
+        textOnly.some(c => /Left side: mostly/.test(c.text)));
 
   await browser.close(); server.close();
   console.log(fails ? fails + ' FAILURE(S)' : '\nall split checks passed');

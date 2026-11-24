@@ -7,7 +7,7 @@ catch (e) { puppeteer = require('/usr/lib/node_modules/puppeteer-core'); }
 
 function findChrome() {
   if (process.env.CHROME_PATH) return process.env.CHROME_PATH;
-  try { const p = puppeteer.executablePath(); if (p && fs.existsSync(p)) return p; } catch (e) {}
+  try { const p = puppeteer.executablePath(); if (typeof p === 'string' && fs.existsSync(p)) return p; } catch (e) {}
   try { return execSync('which chromium || which google-chrome').toString().trim().split('\n')[0]; } catch (e) {}
   return undefined;
 }
