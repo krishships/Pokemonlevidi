@@ -192,6 +192,31 @@ function check(name, cond, detail) {
   check('screenshot was taken', api.shots > 0, 'calls=' + api.shots);
   check('preview shown', api.preview.startsWith('data:image') && api.eyes === 'flex');
   check('model reply decoded and shown', api.log.includes('i see a path'), api.log.slice(-120));
+  // ---------- 8. game-only mode: the picture fills the screen, nothing else
+  await page.click('#gofs');
+  await new Promise(r => setTimeout(r, 400));
+  const g = await page.evaluate(() => {
+    const st = document.getElementById('stage').getBoundingClientRect();
+    const log = document.getElementById('log').getBoundingClientRect();
+    const menu = document.querySelector('.menu');
+    return { w: st.width, h: st.height, vw: innerWidth, vh: innerHeight,
+             logH: log.height, menuShown: menu ? getComputedStyle(menu).display !== 'none' : false,
+             cls: document.body.className };
+  });
+  check('game only fills the viewport', g.w >= g.vw * 0.98 && g.h >= g.vh * 0.98,
+        Math.round(g.w) + 'x' + Math.round(g.h) + ' vs ' + g.vw + 'x' + g.vh);
+  check('game only hides the chat', g.logH === 0, 'log height=' + g.logH);
+  check('game only hides the buttons', !g.menuShown);
+  const exitBox = await page.evaluate(() => {
+    const b = document.getElementById('exitg').getBoundingClientRect();
+    return { w: b.width, h: b.height, shown: getComputedStyle(document.getElementById('exitg')).display };
+  });
+  check('exit button is visible in game only', exitBox.w > 0 && exitBox.h > 0, JSON.stringify(exitBox));
+  await page.evaluate(() => document.getElementById('exitg').click());
+  await new Promise(r => setTimeout(r, 300));
+  const back = await page.evaluate(() => document.body.className);
+  check('exit game only restores the page', !/gonly/.test(back), back);
+
   check('no JS errors in API flow', errors.length === 0, errors.join(' | '));
 
   // ---------- 5. Red keeps playing on his own (no whisper needed)

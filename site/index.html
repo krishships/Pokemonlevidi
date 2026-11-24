@@ -91,6 +91,23 @@
     grid-template-columns:minmax(0,1fr);grid-template-rows:auto auto minmax(0,1fr) auto;
     grid-template-areas:"stage" "bar" "log" "say"}
   body.fs header,body.fs #status,body.fs #eyes,body.fs details{display:none}
+
+  /* GAME ONLY: the picture fills the phone, nothing else is on screen */
+  body.gonly{display:block!important;margin:0;padding:0;overflow:hidden;max-width:none;
+             background:#000;height:100vh;height:100dvh}
+  body.gonly > *{display:none!important}
+  body.gonly #stage{display:flex!important;position:fixed;inset:0;margin:0;padding:0;
+                    width:100vw;height:100vh;height:100dvh;border:0;border-radius:0;
+                    background:#000;align-items:center;justify-content:center;z-index:99999;
+                    aspect-ratio:auto!important}
+  body.gonly #stage #game,body.gonly #stage canvas{width:100%!important;height:100%!important;
+                    max-width:100vw!important;max-height:100dvh!important;object-fit:contain}
+  body.gonly #stage #empty{display:none!important}
+  /* a small way out, tap the picture */
+  #exitg{display:none;position:fixed;top:10px;right:10px;z-index:100000;
+         padding:10px 14px;font:inherit;border-radius:999px;border:2px solid #fff;
+         background:rgba(0,0,0,.55);color:#fff;opacity:.55}
+  body.gonly #exitg{display:block!important}
   body.fs #stage{grid-area:stage;margin:0;width:100%;justify-self:center}
   body.fs .menu{grid-area:bar;margin:0;display:flex;gap:0 14px;padding:2px 10px;justify-content:space-between}
   body.fs .menu .mi{display:none;min-height:34px;padding:4px}
@@ -111,6 +128,7 @@
   <div id="modeLabel">local brain</div>
 </header>
 
+<button id="exitg" title="exit game only">✕</button>
 <div id="stage">
   <div id="game"></div>
   <div id="empty">
@@ -132,6 +150,7 @@
   <button class="mi keep" id="stopAI">REST</button>
   <button class="mi keep" id="savebtn">SAVE</button>
   <button class="mi keep" id="fs">FULL SCREEN</button>
+  <button class="mi" id="gofs">GAME ONLY</button>
   <button class="mi" id="look">LOOK</button>
   <button class="mi" id="testai">TEST AI</button>
   <button class="mi" id="reset">RESET</button>
@@ -872,6 +891,22 @@ function setFs(on) {
   // the stage keeps the game's own ratio (10:9 or 3:2); in landscape the CSS above sizes it by height
   if (on) $('log').scrollTop = $('log').scrollHeight;
 }
+async function gameOnly(on) {
+  document.body.classList.toggle('gonly', on);
+  try {
+    if (on && !document.fullscreenElement) {
+      await (document.documentElement.requestFullscreen &&
+             document.documentElement.requestFullscreen());
+      try { if (screen.orientation && screen.orientation.lock) await screen.orientation.lock('landscape'); } catch (e) {}
+    } else if (!on && document.fullscreenElement) {
+      await document.exitFullscreen();
+    }
+  } catch (e) { /* the CSS mode works even when the browser refuses fullscreen */ }
+}
+$('gofs').addEventListener('click', () => gameOnly(!document.body.classList.contains('gonly')));
+$('exitg').addEventListener('click', (e) => { e.stopPropagation(); gameOnly(false); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && document.body.classList.contains('gonly')) gameOnly(false); });
+
 $('fs').addEventListener('click', async () => {
   const on = !document.body.classList.contains('fs');
   setFs(on);
