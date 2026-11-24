@@ -69,11 +69,13 @@ function check(name, cond, detail) {
     if (m.type() !== 'error') return;
     const t = m.text();
     if (t.includes('ERR_CERT_AUTHORITY_INVALID')) return;  // sandbox proxy
+    if (t.includes('429')) return;                          // the deliberate retry test
     errors.push('console: ' + t);
   });
 
   await page.setRequestInterception(true);
   let apiRequest = null;
+  let apiCalls = 0;
   page.on('request', (req) => {
     const u = req.url();
     if (u.includes('emulatorjs.org') && u.endsWith('loader.js')) {
@@ -90,13 +92,17 @@ function check(name, cond, detail) {
       });
     }
     if (u.includes('/v1/chat/completions')) {
+      apiCalls++;
       apiRequest = { headers: req.headers(), body: JSON.parse(req.postData() || '{}') };
+      if (apiCalls === 1) {                    // first attempt fails, retry must recover
+        return req.respond({ status: 429, headers: { 'Access-Control-Allow-Origin': '*' }, body: '{}' });
+      }
       return req.respond({
         status: 200,
         headers: { 'Access-Control-Allow-Origin': '*' },
         contentType: 'application/json',
         body: JSON.stringify({
-          choices: [{ message: { content: '{"say":"i see a path","act":"left"}' } }]
+          choices: [{ message: { content: 'Sure.\n```json\n{"say":"i see a path","act":"left","steps":2}\n```' } }]
         })
       });
     }
@@ -169,6 +175,7 @@ function check(name, cond, detail) {
   }));
 
   check('API request was made', apiRequest !== null);
+  check('retried after 429', apiCalls >= 2, 'calls=' + apiCalls);
   if (apiRequest) {
     check('auth header sent', /Bearer test-key-123/.test(apiRequest.headers.authorization || ''));
     const msgs = apiRequest.body.messages || [];
@@ -181,6 +188,12 @@ function check(name, cond, detail) {
   check('screenshot was taken', api.shots > 0, 'calls=' + api.shots);
   check('preview shown', api.preview.startsWith('data:image') && api.eyes === 'flex');
   check('model reply decoded and shown', api.log.includes('i see a path'), api.log.slice(-120));
+  // a second whisper fired while one is in flight must not send a second request
+  const before = apiCalls;
+  await page.type('#whisper', 'again');
+  await page.evaluate(() => { const b = document.getElementById('send'); b.click(); b.click(); });
+  await new Promise(r => setTimeout(r, 1500));
+  check('double click sends one request', apiCalls - before <= 1, 'extra=' + (apiCalls - before));
   check('no JS errors in API flow', errors.length === 0, errors.join(' | '));
 
   await browser.close();

@@ -466,16 +466,71 @@ const LOCAL = {
   wait:  ['i will wait', 'standing still']
 };
 
-async function askAPI(whisper, frame) {
-  if (!S.apikey) throw new Error('no key');
+/* ---------------------------------------------------------------- api ---
+ * Hardened so a bad response, a flaky endpoint or a double-click can never
+ * wedge the page:
+ *   - one request in flight at a time (busy guard lives in speak())
+ *   - 20 s timeout, then abort
+ *   - one retry on 429 / 5xx / network error, with backoff
+ *   - JSON pulled out of a fenced block first, then the first {...} object
+ *   - content may be a string or an array of parts
+ *   - endpoint without a scheme gets https://
+ *   - history capped so it cannot grow without bound
+ */
+function normEndpoint(u) {
+  const t = String(u || '').trim();
+  if (!t) return DEFAULTS.endpoint;
+  if (/^https?:\/\//i.test(t)) return t;
+  return 'https://' + t.replace(/^\/+/, '');
+}
+
+function extractJson(text) {
+  const s = String(text || '');
+  const fence = /```(?:json)?\s*([\s\S]*?)```/i.exec(s);
+  if (fence) { try { return JSON.parse(fence[1].trim()); } catch (e) {} }
+  // first balanced {...}
+  const start = s.indexOf('{');
+  if (start >= 0) {
+    let depth = 0;
+    for (let i = start; i < s.length; i++) {
+      if (s[i] === '{') depth++;
+      else if (s[i] === '}') { depth--; if (depth === 0) { try { return JSON.parse(s.slice(start, i + 1)); } catch (e) { break; } } }
+    }
+  }
+  try { return JSON.parse(s); } catch (e) {}
+  return null;
+}
+
+function messageText(data) {
+  const m = data && data.choices && data.choices[0] && data.choices[0].message;
+  if (!m) return '';
+  if (typeof m.content === 'string') return m.content;
+  if (Array.isArray(m.content)) return m.content.map(p => (typeof p === 'string' ? p : p.text || '')).join('');
+  return '';
+}
+
+function explain(err) {
+  const msg = String((err && err.message) || err);
+  if (/abort/i.test(msg)) return 'timed out after 20s';
+  if (/^http 401/.test(msg)) return 'key rejected (401)';
+  if (/^http 403/.test(msg)) return 'blocked (403) — check the key or CORS';
+  if (/^http 429/.test(msg)) return 'rate limited (429)';
+  if (/^http 5/.test(msg)) return 'server error (' + msg.slice(5) + ')';
+  if (/^http /.test(msg)) return msg;
+  if (/failed to fetch|networkerror/i.test(msg)) return 'network or CORS blocked the request';
+  if (/not json/i.test(msg)) return 'reply was not JSON';
+  return msg;
+}
+
+async function askOnce(whisper, frame) {
   const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 12000);
+  const t = setTimeout(() => ctrl.abort(), 20000);
   try {
     const msgs = [{ role: 'system', content: S.persona }];
     for (const h of history.slice(-6)) msgs.push(h);
     const instruction =
       'The voice says: "' + whisper + '"\n' +
-      'Reply with strict JSON only: {"say":"<one short line>","act":"up|down|left|right|talk|menu|cancel|wait","steps":<1-8>}';
+      'Reply with strict JSON only, no prose: {"say":"<one short line>","act":"up|down|left|right|talk|menu|cancel|wait","steps":<1-8>}';
     msgs.push(frame
       ? { role: 'user', content: [
           { type: 'text', text: 'This is what you see right now.\n' + instruction },
@@ -483,23 +538,37 @@ async function askAPI(whisper, frame) {
         ] }
       : { role: 'user', content: instruction + '\nYou cannot see anything right now.' });
 
-    const res = await fetch(S.endpoint, {
+    const res = await fetch(normEndpoint(S.endpoint), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + S.apikey },
       signal: ctrl.signal,
       body: JSON.stringify({ model: S.model, max_tokens: 90, temperature: 0.85, messages: msgs })
     });
-    if (!res.ok) throw new Error('http ' + res.status);
+    if (!res.ok) {
+      const e = new Error('http ' + res.status);
+      e.status = res.status;
+      throw e;
+    }
     const data = await res.json();
-    const text = (data.choices && data.choices[0] && data.choices[0].message)
-      ? data.choices[0].message.content : '';
-    const m = /\{[\s\S]*\}/.exec(text || '');
-    if (!m) throw new Error('not json');
-    const p = JSON.parse(m[0]);
+    const p = extractJson(messageText(data));
+    if (!p) throw new Error('not json');
     const act = ACT[p.act] ? p.act : 'talk';
     const steps = Math.max(1, Math.min(8, parseInt(p.steps, 10) || 1));
     return { say: String(p.say || '').slice(0, 140), act, steps, source: 'api' };
   } finally { clearTimeout(t); }
+}
+
+async function askAPI(whisper, frame) {
+  if (!S.apikey) throw new Error('no key');
+  try {
+    return await askOnce(whisper, frame);
+  } catch (err) {
+    const st = err && err.status;
+    const retryable = !st || st === 429 || st >= 500;
+    if (!retryable) throw err;
+    await new Promise(r => setTimeout(r, 700));
+    return askOnce(whisper, frame);          // one retry, then give up
+  }
 }
 
 /* ============================================================== acting */
@@ -532,10 +601,17 @@ $('stopAI').addEventListener('click', () => {
 });
 
 /* ============================================================= whisper */
+let busy = false;
+
 async function speak() {
+  if (busy) return;                          // one whisper in flight at a time
   const box = $('whisper');
   const text = box.value.trim();
   if (!text) return;
+  busy = true;
+  const sendBtn = $('send');
+  if (sendBtn) sendBtn.disabled = true;
+  try {
   box.value = '';
   log('you', text);
   history.push({ role: 'user', content: 'The voice says: ' + text });
@@ -547,7 +623,7 @@ async function speak() {
     try {
       reply = await askAPI(text, frame);
     } catch (err) {
-      log('sys', 'api failed (' + err.message + ') — falling back to local');
+      log('sys', 'api failed (' + explain(err) + ') — falling back to local');
       const i = parseIntent(text);
       reply = { say: LOCAL[i.act][0], act: i.act, steps: i.steps, source: 'local' };
     }
@@ -558,6 +634,7 @@ async function speak() {
 
   log('him', reply.say || '…');
   history.push({ role: 'assistant', content: reply.say || '' });
+  if (history.length > 12) history.splice(0, history.length - 12);
   if (!awake && emu) {
     awake = true;
     clearInterval(idleTimer); idleTimer = setInterval(idle, 2400);
@@ -565,6 +642,10 @@ async function speak() {
   }
   perform(reply.act, reply.steps);
   paintStatus();
+  } finally {
+    busy = false;
+    if (sendBtn) sendBtn.disabled = false;
+  }
 }
 
 $('send').addEventListener('click', speak);
