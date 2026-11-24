@@ -39,10 +39,10 @@ jobs:
 
   deploy:
     name: Deploy to Pages
-    # Only runs once Pages is switched on (Settings -> Pages -> GitHub Actions).
-    # Without this the job fails on every push and the repo shows a red X.
-    if: vars.ENABLE_PAGES == 'true'
+    # Pages is enabled on this repo (build_type=workflow). continue-on-error
+    # keeps a future misconfiguration from turning every push red.
     needs: package
+    continue-on-error: true
     runs-on: ubuntu-latest
     continue-on-error: true
     environment:
