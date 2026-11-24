@@ -6,6 +6,16 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
+
+/* CI installs Chrome through puppeteer; a distro chromium is often a snap
+ * wrapper that never prints a devtools URL. Prefer puppeteer's own binary. */
+function findChrome(puppeteer) {
+  if (process.env.CHROME_PATH) return process.env.CHROME_PATH;
+  try { const p = puppeteer.executablePath(); if (p && fs.existsSync(p)) return p; } catch (e) {}
+  try { return execSync('which chromium || which google-chrome || which chromium-browser')
+            .toString().trim().split('\n')[0]; } catch (e) {}
+  return undefined;
+}
 const puppeteer = require('puppeteer-core');
 
 const SITE = path.join(__dirname, '..', 'site');

@@ -3,6 +3,16 @@
  */
 const http = require('http'), fs = require('fs'), path = require('path');
 const { execSync } = require('child_process');
+
+/* CI installs Chrome through puppeteer; a distro chromium is often a snap
+ * wrapper that never prints a devtools URL. Prefer puppeteer's own binary. */
+function findChrome(puppeteer) {
+  if (process.env.CHROME_PATH) return process.env.CHROME_PATH;
+  try { const p = puppeteer.executablePath(); if (p && fs.existsSync(p)) return p; } catch (e) {}
+  try { return execSync('which chromium || which google-chrome || which chromium-browser')
+            .toString().trim().split('\n')[0]; } catch (e) {}
+  return undefined;
+}
 let puppeteer;
 try { puppeteer = require('puppeteer-core'); }
 catch (e) { puppeteer = require('/usr/lib/node_modules/puppeteer-core'); }
@@ -47,7 +57,7 @@ const check = (n, ok, extra) => { if (!ok) fails++; console.log((ok ? '  PASS ' 
   await new Promise(r => server.listen(8977, r));
   const browser = await puppeteer.launch({
     executablePath: process.env.CHROME_PATH || execSync('which chromium 2>/dev/null || which google-chrome').toString().trim(),
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--ignore-certificate-errors']
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--ignore-certificate-errors']
   });
   const page = await browser.newPage();
   await page.goto('http://localhost:8977/', { waitUntil: 'domcontentloaded' });
