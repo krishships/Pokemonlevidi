@@ -48,6 +48,12 @@ jobs:
           echo "size   : $SIZE bytes"
           echo "sha256 : $SHA"
           {
+            echo "## Download the ROM"
+            echo ""
+            echo "Scroll to the **Artifacts** section at the bottom of this page"
+            echo "and download **\`emerald-gba\`**. Unzip it for \`emerald.gba\`."
+            echo "The \"Publish site\" workflow has no ROM — it only ships the web page."
+            echo ""
             echo "### emerald.gba"
             echo ""
             echo "| | |"
