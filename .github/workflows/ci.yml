@@ -31,3 +31,5 @@ jobs:
         run: node tests/ui.test.js
       - name: Two-model split (eyes vs brain)
         run: node tests/split.test.js
+      - name: Every button, no runtime errors
+        run: node tests/smoke.test.js
