@@ -1,0 +1,258 @@
+===============================================================================
+ POKEMONLEVIDI — HELP REQUEST
+ An AI plays Pokemon Emerald; the user watches and whispers instructions.
+ Written as a self-contained brief. Everything below is measured, not assumed.
+===============================================================================
+
+0. WHAT I WANT FROM YOU
+-----------------------
+Six numbered questions at the end (section 8). Please answer those directly,
+in order, with concrete addresses, offsets or code where possible. If
+something is impossible, say so plainly instead of proposing a workaround that
+needs a display, a compiler or admin rights — this environment has none of
+those (section 7).
+
+Do not re-derive what section 3 says already works.
+
+
+1. THE PROJECT
+--------------
+A single HTML page runs a Pokemon Emerald ROM in the browser via EmulatorJS
+(mgba core, WebAssembly). An AI watches the screen and presses buttons while
+the user types instructions. Separately, a Node harness runs the same ROM with
+full memory access for development and testing.
+
+Two halves, deliberately:
+  - Browser (site/index.html)  : the product. Pixels only. No RAM.
+  - Node (scratch harness)     : the workbench. Full RAM via a pure-JS GBA core.
+
+The goal is for the AI to play Emerald from the start: leave the house, reach
+Route 101, meet Birch, take a starter. Catching requires Poke Balls, which are
+several milestones later, so "first Pokemon" means the starter.
+
+
+2. STACK, AND THE HARD CONSTRAINTS
+----------------------------------
+Browser half
+  - EmulatorJS, mgba core, loaded from cdn.emulatorjs.org.
+  - Input : gameManager.simulateInput(player, buttonIndex, value)
+  - Vision: gameManager.screenshot() returns PNG bytes.
+  - Memory: NOT AVAILABLE. EmulatorJS does not export
+    retro_get_memory_data / retro_get_memory_size. A runtime probe confirms
+    both are undefined. The page sees pixels and nothing else. This is the
+    root cause of most problems below.
+
+Node half
+  - @gba-kit/gba-emulator (npm, MIT, pure JavaScript, no native code).
+  - gba.bus.read8/16/32, gba.ppu.getFramebuffer(), gba.pressButton(),
+    gba.runFrame(), gba.serialize()/deserialize().
+  - Speed: roughly 30-35 emulated frames per second. One tile step needs about
+    16 frames, so a 290-second execution window covers ~90-100 steps. This is
+    the binding constraint on everything.
+  - serialize() returns typed arrays. JSON.stringify destroys them, so a
+    round-trip through JSON fails with
+    "snap.sram.subarray is not a function". I encode every typed array as
+    {__t: ctorName, __b: base64} and rebuild on load. That works and lets
+    progress persist between 290-second windows.
+
+Environment (this matters for any suggestion you make)
+  - Debian 12, glibc 2.36, x86_64, non-root, no sudo.
+  - No display, no Xvfb, no cmake, no SDL headers, no devkitARM.
+  - mGBA's Linux AppImage ships only mgba-qt, which has no "offscreen" Qt
+    platform plugin, so it cannot start here.
+  - node-mgba ships libmgba.so built against glibc 2.38 and will not load.
+  - "pip install mgba" returns "No matching distribution found".
+  - "pip install pygba" installs, but needs the native mgba module, which is
+    not on PyPI and needs cmake + SDL to build.
+  - Outbound network is an allowlist. github.com, api.github.com and
+    raw.githubusercontent.com work. cdn.jsdelivr.net is not guaranteed.
+
+
+3. WHAT ALREADY WORKS — DO NOT REDO
+-----------------------------------
+Page
+  - Emerald boots and renders (mgba), title screen through to gameplay.
+  - Whisper -> API -> JSON action -> button press, end to end.
+  - Save to IndexedDB, autosave every 60 s and on tab hide, restore on reload.
+  - RESET (two taps) wipes ROM, save, key, settings, chat.
+  - FULL SCREEN (app layout) and GAME ONLY (picture alone, whole viewport).
+  - Groq is the only provider: endpoint pinned at load, model validated to
+    contain "/", key detected by the gsk_ prefix.
+  - Cost control: the screenshot is sent only every Nth call (default 3), on a
+    whisper, when stuck, or when the scene changes. Other turns get a free
+    local description: a 12x8 tile map of the screen in letters, left/centre/
+    right colour names, a scroll-direction note, and optional OCR of the
+    dialogue box.
+  - OCR: Tesseract.js from a CDN, on by default, gated on "is a text box
+    showing", raced against a 2.5 s timeout, prefetched 4 s after load, so a
+    slow CDN cannot stall the game.
+
+Node harness
+  - Boots the ROM, runs the intro, survives the naming screen, and can save and
+    restore state across calls.
+  - Escaped the moving truck (see section 4, item 1).
+
+Tests (all green in CI)
+  - tests/pure.test.js    : parsing, local keyword brain, button expansion
+  - tests/ui.test.js      : 24 headless-browser checks
+  - tests/split.test.js   : eyes vs brain, picture cadence, tile map in prompt
+  - tests/smoke.test.js   : presses every button, asserts no runtime errors
+
+
+4. PROBLEMS, IN ORDER OF SEVERITY
+---------------------------------
+
+(1) SOLVED — the moving truck
+    The player starts inside the truck, map 25:40. Input is locked until the
+    arrival cutscene ends, and a fixed-timing script lands inside that lock
+    about half the time.
+    Solved empirically: a map-header candidate decoded warps at (4,1), (4,2),
+    (4,3); walking to (4,2) and pressing RIGHT warped to Littleroot Town,
+    map 0:9, position (3,10).
+    Note: that same candidate decoded mapGroup/mapNum as 127 for every warp,
+    i.e. garbage. Only the x/y were usable. Question 3 is about that.
+
+(2) OPEN — finding gMapHeader in RAM
+    I need the current map's warp table at runtime so the bot walks to doors
+    instead of guessing.
+    What I know from the source (rh-hideout/pokeemerald-expansion):
+        struct MapHeader {
+            /*0x00*/ const struct MapLayout    *mapLayout;   // ROM ptr
+            /*0x04*/ const struct MapEvents    *events;      // ROM ptr
+            /*0x08*/ const u8                 *mapScripts;   // ROM ptr
+            /*0x0C*/ const struct MapConnections *connections; // ROM ptr, may be 0
+            /*0x10*/ u16 music; /*0x12*/ u16 mapLayoutId; ...
+        };
+        struct MapEvents {
+            u8 objectEventCount;  // +0x00
+            u8 warpCount;         // +0x01
+            u8 coordEventCount;   // +0x02
+            u8 bgEventCount;      // +0x03
+            const struct ObjectEventTemplate *objectEvents; // +0x04
+            const struct WarpEvent *warps;                  // +0x08
+            const struct CoordEvent *coordEvents;           // +0x0C
+            const struct BgEvent *bgEvents;                 // +0x10
+        };
+        struct WarpEvent { s16 x; s16 y; u8 elevation; u8 warpId; u8 mapNum; u8 mapGroup; }; // 8 bytes
+        struct MapLayout { s32 width; s32 height; ... };   // width/height at 0x00/0x04
+    What I tried:
+      a. Scan EWRAM 0x02000000-0x02040000 and IWRAM 0x03000000-0x03008000 for
+         four consecutive ROM pointers (0x08xxxxxx). Result: 4 candidates.
+      b. Reject candidates whose events.warpCount is > 32 or whose warps pointer
+         is not in ROM. Result: all 4 still pass.
+      c. Reject candidates whose mapLayout has implausible width/height
+         (0 < w,h < 200). Result: ZERO candidates.
+      d. Take three MapHeaders found in ROM that warp to 0:9 (Littleroot) —
+         0x897bab0 (11x9), 0x897bae8 (11x9), 0x897bb20 (13x13) — and search
+         EWRAM/IWRAM for a word pair equal to (mapLayout, events) of each.
+         Result: no RAM copy for any of them.
+    So either gMapHeader is not in EWRAM/IWRAM, or it is not a byte copy of a
+    ROM MapHeader, or my offsets are wrong for this build.
+
+(3) OPEN — warp struct decoding gives 127
+    Every warp decoded from the RAM candidate returned warpId=127, mapNum=127,
+    mapGroup=127 (0x7F), while x and y were sensible. Either the struct is
+    padded/aligned differently in this build, or those bytes are genuinely
+    uninitialised in whatever struct I hit.
+
+(4) OPEN — no symbol table
+    The ROM is a pokeemerald-based hack, 16 MB, header POKEMON EMER / BPEE.
+    Retail addresses do NOT apply: gSaveBlock1Ptr at the retail 0x03005D8C
+    reads garbage (0xe3110001); the real pointer was found by scanning IWRAM
+    for a pointer into EWRAM and lands at 0x030071F0.
+    No .map file exists for this build. The CI artifact contains only the ROM.
+
+(5) OPEN — input lock during scripted scenes
+    "Can I press a button right now" is currently answered by pressing a
+    direction and comparing positions, which costs ~40 emulated frames per
+    probe. gJoyIgnore is a pokered name and does not exist here; the real
+    gates are behind ArePlayerFieldControlsLocked / ScriptContext_IsEnabled,
+    which are functions.
+
+(6) OPEN — navigation in interiors
+    Currently inside the player's house (map 1:0) at (8,8). Mom stands in the
+    doorway and her dialogue re-opens whenever the exit tile is approached.
+    In Emerald the intended order is: talk to Mom, go upstairs, set the clock,
+    come back down, then leave. I found the staircase visually (brown, top
+    right) and reached (10,3), but did not land on its warp tile. The ROM scan
+    suggests the house's upstairs warp is (8,2), but the approach along that
+    row is blocked by furniture.
+
+(7) SOLVED — browser-side API failures
+    A stale endpoint in localStorage was being used while the field displayed
+    the Groq URL, so a POST landed on a static host and came back
+    "405 Not Allowed" with an HTML body. The endpoint is now forced at load,
+    not only on save. A ?api=<url> query parameter can override it on purpose.
+
+
+5. WHAT THE ROM IS
+------------------
+  - File: heart-and-soul.gba, 16,777,216 bytes.
+  - Header: title "POKEMON EMER", code "BPEE", maker "01", checksum 0x72, PASS.
+  - Built from a pokeemerald-based source tree; it is NOT retail Emerald, and
+    it is not obviously pokeemerald-expansion either (the expansion's struct
+    layouts are what I have been coding against).
+  - Save block: pointer found at IWRAM 0x030071F0. Layout used:
+        +0x00 s16 x, +0x02 s16 y, +0x04 u8 mapGroup, +0x05 u8 mapNum,
+        +0x234 u8 partyCount
+    These read correctly and match the observed maps (25:40 truck, 0:9
+    Littleroot, 1:0 house).
+
+
+6. HOW I VERIFY THINGS
+----------------------
+Empirical, not by inspection: walk to a tile, press a direction, then compare
+the map id and position read from RAM. That is how the truck door was found
+after the decoder gave only partial data. Any answer you give can be tested
+the same way, so prefer answers that produce a specific address or tile to try.
+
+
+7. WHAT I CANNOT DO (so you do not suggest it)
+----------------------------------------------
+  - Run anything with a display. No X, no Xvfb, no offscreen Qt plugin.
+  - Compile C. No cmake, no SDL headers, no devkitARM locally.
+  - Load a native library built for glibc 2.38 (this is 2.36).
+  - Rely on arbitrary outbound hosts; only the allowlist above is safe.
+  - Read GBA memory from inside the browser page.
+
+
+8. QUESTIONS
+------------
+Q1. In pokeemerald / pokeemerald-expansion, where does gMapHeader actually
+    live at runtime — which region (EWRAM, IWRAM), and is it a struct copy or
+    a pointer to a ROM MapHeader? If it is a copy, is there a second structure
+    (gBackupMapData or similar) that also holds the current map?
+
+Q2. Given a MapHeader address in ROM (for example 0x897bab0) and the current
+    mapGroup/mapNum from the save block (for example 25:40), what is the
+    cleanest way to obtain that map's MapHeader at runtime with no symbol
+    table? I tried matching (mapLayout, events) word pairs in RAM and found
+    nothing. What am I missing about how the map system loads a map?
+
+Q3. Is the WarpEvent layout different in this codebase — padding, alignment,
+    or a different field order — such that reading mapGroup/mapNum at +0x06/
+    +0x07 returns 0x7F? What is the correct way to read a warp's destination?
+
+Q4. What is the most reliable way to get a .map file for a build I do not
+    control? Options I see: rebuild the same commit in CI and upload only
+    pokeemerald.map (build metadata, not a ROM); or extract symbol addresses
+    from a community symbol list for this hack. Is there a third option?
+
+Q5. Is there any RAM-readable flag for "player input is locked" or "a message
+    box is open" in this codebase — something a script can read without
+    calling ArePlayerFieldControlsLocked? If it is file-static, does it still
+    appear in the .map?
+
+Q6. For the player's house in Emerald (map 1:0): what are the exact warp tile
+    coordinates for the front door and the staircase to 2F, and what is the
+    intended order of events before Mom allows the player to leave? I have
+    (8,2) for the stairs and (8,8)/(9,8) for the door from a ROM scan, but
+    neither behaved as expected in play.
+
+
+9. WHAT A GOOD ANSWER LOOKS LIKE
+--------------------------------
+Addresses, offsets, and a sentence on how to test each one. If the answer is
+"you need the .map file", say that plainly — that is a useful answer and it
+changes what I build next.
+===============================================================================
