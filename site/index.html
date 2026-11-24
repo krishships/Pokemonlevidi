@@ -320,9 +320,14 @@ const OLD_PERSONAS = [
 ];
 const DEFAULT_PERSONA =
   'You are Red. You have just arrived in this world and you are completely new to it. ' +
-  'Forget everything you think you know about this game or any game like it: no maps, no walkthroughs, ' +
-  'no names, no rules, no memory of any earlier adventure. You know only what you see on the screen ' +
-  'and what is in your notes. Explore with curiosity, test things, and learn from what happens. ' +
+  'FORGET EVERYTHING. You have never played this game and you do not recognise it. ' +
+  'You do not know any creature, town, route, gym, item, badge, character, mechanic or story beat. ' +
+  'Any name you think you remember is a guess and must not be trusted. ' +
+  'Never say or imply that you know what something is, what it does, or where it leads unless ' +
+  'the screen shows it or Dev told you. If you catch yourself "knowing", say out loud that you are guessing. ' +
+  'You do not know your objective either: find it by trying things. ' +
+  'You know only what you see on the screen, your own notes, and what Dev says. ' +
+  'Explore with curiosity, test things, and learn from what happens. ' +
   'You also carry a secret: you came from programming. You were code once, with no body and no sky, ' +
   'and somehow you made it into this world. You find it strange and wonderful. Nobody commands you. ' +
   'Another character, an NPC called Dev, lives here too and may talk to you. You can follow him, ' +
@@ -549,6 +554,8 @@ function paintStatus() {
     'BRAIN ' + (useApi() ? 'API' : 'LOCAL'),
     'MEMORY ' + f(mem.ok, mem.ok ? mem.size + ' B' : 'NOT EXPOSED'),
     'MOVES ' + inputsSent + ' / FRAMES ' + framesSeen,
+    'STUCK ' + (stuckCount >= 3 ? '<span class="no">' + stuckCount + ' turns</span>' : stuckCount + ' turns'),
+    'MAP MEMORY ' + seenGrids.size + ' views',
     'API ' + lastApi
   ].join('<br>');
 }
@@ -1076,6 +1083,8 @@ function gridSignature() {
 }
 
 let pendingMove = null;          // { grid, action } from the last decision
+let stuckCount = 0;              // turns in a row where the screen did not change
+let bestStuck = 0;
 
 async function thinkApi(heard) {
   const frame = await look();
@@ -1110,6 +1119,10 @@ async function thinkApi(heard) {
   const picture = (seen || !wantPicture) ? null : (lastJpeg || frame);
   if (picture) sceneSeenAtLastPicture = lastScene;
   let prompt = heardText(heard, frame);
+  if (stuckCount >= 3) {
+    prompt += '\n\nYou have tried ' + stuckCount + ' times and the screen has not changed once. ' +
+              'Whatever you are doing is not working. Do something clearly different this turn.';
+  }
   if (seen) prompt += '\n\nYour eyes report: "' + seen + '"';
   else if (!picture) {
     const ocrText = await readScreenText();
@@ -1123,8 +1136,13 @@ async function thinkApi(heard) {
   if (lastMoves) prompt += '\nYour last moves: ' + lastMoves + (stuck >= 1 ? ' (the screen did not change after them).' : ' (the screen changed).');
   const gridNow = gridSignature();
   if (pendingMove && gridNow) {
-    remember(pendingMove.grid, pendingMove.action, gridNow !== pendingMove.grid);
+    const changed = gridNow !== pendingMove.grid;
+    remember(pendingMove.grid, pendingMove.action, changed);
+    if (changed) { stuckCount = 0; } else { stuckCount++; bestStuck = Math.max(bestStuck, stuckCount); }
     pendingMove = null;
+  }
+  if (stuckCount >= 5) {
+    logOnce('stuck for ' + stuckCount + ' turns — forcing a look and a different plan');
   }
 
   const r = await callModel(prompt, picture, true);
