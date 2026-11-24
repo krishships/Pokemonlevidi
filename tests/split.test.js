@@ -182,7 +182,7 @@ const check = (n, ok, extra) => { if (!ok) fails++; console.log((ok ? '  PASS ' 
         textOnly.some(c => /Grid 30x20, one letter per 8x8 tile/.test(c.text)),
         'checked ' + textOnly.length + ' text calls');
   check('a text-only call says what is around the player',
-        textOnly.some(c => /Around you: up \w+, down \w+, left \w+, right \w+/.test(c.text)));
+        textOnly.some(c => /Around you: up [A-Za-z?]+, down [A-Za-z?]+, left [A-Za-z?]+, right [A-Za-z?]+/.test(c.text)));
   check('a text-only call says where the player is in the grid',
         textOnly.some(c => /figure at the centre of the grid/.test(c.text)));
   check('a text-only call does not ship a second, coarser grid',

@@ -901,7 +901,8 @@ const COLOURS = [
   [128, 128, 128, 'grey'], [90, 90, 90, 'dark grey'],
   [60, 110, 60, 'dark green'], [120, 190, 120, 'light green'],
   [200, 170, 110, 'sand'], [140, 100, 60, 'brown'],
-  [70, 110, 190, 'blue'], [200, 60, 60, 'red'], [220, 200, 80, 'yellow']
+  [70, 110, 190, 'blue'], [200, 60, 60, 'red'], [220, 200, 80, 'yellow'],
+  [152, 208, 248, 'sky'], [104, 144, 240, 'sky'], [96, 168, 96, 'tall grass']
 ];
 function colourName(r, g, b) {
   let best = 'mixed', bd = 1e9;
@@ -1077,6 +1078,7 @@ function classify(r, g, b) {
     const d = (r - cr) ** 2 + (g - cg) ** 2 + (b - cb) ** 2;
     if (d < bd) { bd = d; best = name; }
   }
+  if (bd > 6000) return 'mixed';                              // nothing close: say so
   const luma = 0.299 * r + 0.587 * g + 0.114 * b;
   if (best === 'blue' && luma > 150) best = 'sky';            // sky is not a lake
   if (best === 'dark green' && luma > 96) best = 'tall grass'; // tall grass is not a tree
@@ -1121,21 +1123,25 @@ function screenToText() {
             const q = px(i, j);
             mad += Math.abs(q[0] - r) + Math.abs(q[1] - g) + Math.abs(q[2] - b);
           }
-        mad /= 32;
-        const letter = mad > 26 ? '?' : (LETTERS[classify(r, g, b)] || '?');
+        mad /= 48;                              // 16 samples x 3 channels
+        const letter = mad > 20 ? '?' : (LETTERS[classify(r, g, b)] || '?');
         row += letter;
       }
       rows.push(row); grid.push(row.split(''));
     }
 
     // exits: where a non-wall letter reaches each edge
-    const wall = ch => ch === 'T' || ch === 'V' || ch === 'K' || ch === 'D';
+    const walkable = ch => ch === 'P' || ch === 'G' || ch === 'V';
+    const wall = ch => ch === 'T' || ch === 'V' || ch === 'K' || ch === 'D' || ch === '?';
     const spans = (cells) => {
+      // an exit is a run of walkable cells in an edge that is otherwise walled;
+      // open ground with no wall at all has no exits to report
+      if (!cells.some(wall)) return '';
       const out = []; let i = 0;
       while (i < cells.length) {
-        if (wall(cells[i])) { i++; continue; }
-        let j = i; while (j < cells.length && !wall(cells[j])) j++;
-        if (j - i >= 2) out.push(i + '-' + (j - 1));
+        if (!walkable(cells[i])) { i++; continue; }
+        let j = i; while (j < cells.length && walkable(cells[j])) j++;
+        out.push(i + '-' + (j - 1));
         i = j;
       }
       return out.join(',');
@@ -1160,8 +1166,7 @@ function screenToText() {
     const boxOpen = darkRow && (bw / Math.max(1, bn) > 0.4);
 
     // centre from a block, not one pixel
-    const cc = px(120, 80);
-    const centre = LETTERS[classify(cc[0], cc[1], cc[2])] || '?';
+    const centre = grid[GH >> 1][GW >> 1];      // the same cell the grid shows
 
     const around = (dy, dx) => {
       const gy = 10 + dy, gx = 15 + dx;
@@ -1170,6 +1175,13 @@ function screenToText() {
     };
     const near = 'Around you: up ' + around(-1, 0) + ', down ' + around(1, 0) +
                  ', left ' + around(0, -1) + ', right ' + around(0, 1) + '.';
+
+    // only name the letters this frame contains
+    const NAMES = { W: 'white', K: 'black', S: 'grey', D: 'dark grey', T: 'tree',
+                    V: 'tall grass', G: 'grass', P: 'path', B: 'brown', U: 'water',
+                    A: 'sky', R: 'red', Y: 'yellow', '?': 'mixed' };
+    const usedLetters = [...new Set(grid.flat().join(''))].sort()
+      .map(c => c + ' ' + (NAMES[c] || 'other')).join(' ');
 
     // collapse identical consecutive rows: "T30x5"
     const enc = []; let i = 0;
@@ -1185,11 +1197,9 @@ function screenToText() {
       (exits.length ? ' Exits: ' + exits.join(' ') + '.' : ' No exits on any edge.') +
       ' You are the figure at the centre of the grid.',
       near,
-      'Grid 30x20, one letter per 8x8 tile, top row first. A number after a letter ' +
-      'is how many in a row it repeats (T30 = 30 tree tiles), and xN after a row means ' +
-      'that whole row repeats N times. Letters: ' +
-      'W white K black S grey D dark grey T tree V tall grass G grass P path ' +
-      'B brown U water A sky R red Y yellow ? mixed',
+      'Grid 30x20, one letter per 8x8 tile, top row first. A number after a letter is a ' +
+      'repeat count (T30 = 30 tree tiles); xN after a row means the row repeats. ' +
+      'Letters here: ' + usedLetters, 
       enc.join('/')
     ].join('\n');
   } catch (e) { return ''; }
