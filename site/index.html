@@ -316,16 +316,11 @@ const FORMAT =
 
 const PRESETS = {
   groq:   { endpoint: 'https://api.groq.com/openai/v1/chat/completions', model: 'qwen/qwen3.8-27b' },
-  openai: { endpoint: 'https://api.openai.com/v1/chat/completions', model: 'gpt-4o-mini' },
-  google: { endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', model: 'gemini-2.0-flash' }
+  openai: { endpoint: 'https://api.openai.com/v1/chat/completions', model: 'gpt-4o-mini' }
 };
 /* the key tells you the provider; you should not have to pick a model */
 const KEYURL = {
-  groq:       'https://console.groq.com/keys',
-  openai:     'https://platform.openai.com/api-keys',
-  openrouter: 'https://openrouter.ai/keys',
-  ollama:     'https://ollama.com/download',
-  google:     'https://aistudio.google.com/apikey'
+  groq: 'https://console.groq.com/keys'          // the only provider
 };
 
 function showKeyUrl(provider) {
@@ -339,8 +334,8 @@ function showKeyUrl(provider) {
 function detectProvider(key) {
   const k = String(key || '').trim();
   if (/^gsk_/.test(k)) return 'groq';
-  if (/^sk-or-v1-/.test(k)) return 'openrouter';
-  if (/^AIza[0-9A-Za-z_-]{20,}/.test(k)) return 'google';
+  if (/^AIza[0-9A-Za-z_-]{20,}/.test(k)) return null;   // a Google key: not supported any more
+  if (/^sk-or-v1-/.test(k)) return null;               // OpenRouter: not supported any more
   if (/^sk-/.test(k)) return 'openai';
   return null;
 }
@@ -391,7 +386,9 @@ function keyDetect() {
   const k = $('apikey').value.trim();
   const p = detectProvider(k);
   const hint = $('keyhint');
-  if (hint) hint.textContent = p ? ('detected: ' + p + ' — endpoint and model set to match') : (k ? 'unrecognised key format' : '');
+  if (hint) hint.textContent = p
+    ? 'detected: groq — endpoint and model set to match'
+    : (k ? 'that is not a Groq key. Groq keys start with gsk_ — get one at console.groq.com/keys' : '');
   if (p) showKeyUrl(p);
   if (!p) return;
   const preset = PRESETS[p];
@@ -697,7 +694,7 @@ async function callModel(userText, frame, withHistory, ov) {
       signal: ctrl.signal,
       body: JSON.stringify(Object.assign(
         { model: MODEL, max_tokens: 220, temperature: 0.8, messages: msgs },
-        /openai\.com|groq\.com|openrouter\.ai/.test(S.endpoint || '')
+        /groq\.com/.test(S.endpoint || '')
           ? { response_format: { type: 'json_object' } } : {}
       ))
     });
