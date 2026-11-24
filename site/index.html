@@ -195,10 +195,14 @@
 
     <div class="hint" style="margin-top:12px"><b>EYES (optional)</b> — a second model that only reads the screen.
       Leave blank and the brain looks at the picture itself.<br>
-      <b>Most reliable:</b> keep one Groq key and use it for both. Eyes
-      <code>qwen/qwen3.8-27b</code>, brain <code>openai/gpt-oss-20b</code> — same
-      endpoint, same key, two models.<br>
-      Gemini's endpoint often refuses browser calls, so expect errors with it.</div>
+      Two setups that work:
+      <br>· <b>one Groq key for both</b> — eyes <code>qwen/qwen3.8-27b</code>,
+      brain <code>openai/gpt-oss-20b</code>. Same endpoint, same key, two models.
+      Press the button below to fill it in.
+      <br>· <b>Gemini as the eyes</b> — <code>gemini-2.0-flash</code> with an
+      <code>AIza…</code> key. Not yet verified here: some providers refuse
+      browser calls with CORS. If TEST AI returns 403, that is what happened,
+      and the Groq setup above avoids it.</div>
     <input type="text" id="eyesEndpoint" placeholder="eyes endpoint (blank = same as brain)">
     <input type="text" id="eyesModel" placeholder="eyes model, e.g. gemini-2.0-flash">
     <input type="password" id="eyesKey" placeholder="eyes key (blank = same as brain)" autocomplete="off">
