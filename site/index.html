@@ -211,6 +211,12 @@
       <button class="sm" id="listmodels">LIST MODELS</button>
     </div>
 
+    <label>PICTURE EVERY N CALLS</label>
+    <input type="text" id="imgEvery" inputmode="numeric" placeholder="3">
+    <div class="hint">Vision tokens are what runs you into 429. He gets a text description of
+      the screen on the other calls, and the real picture on every Nth — or immediately when you
+      speak to him, or when he has not moved for a few tries. Set 1 to always send the image.</div>
+
     <label>SECONDS BETWEEN RED'S MOVES</label>
     <input type="text" id="gap" inputmode="numeric" placeholder="5">
     <div class="hint">Free API plans have rate limits. Raise this if you see errors 429.</div>
@@ -346,7 +352,8 @@ function detectProvider(key) {
 
 const DEFAULTS = Object.assign({
   mode: 'local', apikey: '', gap: 5, persona: DEFAULT_PERSONA,
-  eyesEndpoint: '', eyesModel: '', eyesKey: ''      // optional second model that only reads the screen
+  eyesEndpoint: '', eyesModel: '', eyesKey: '',      // optional second model that only reads the screen
+  imgEvery: 3                                        // send the picture on 1 call in N, text otherwise
 }, PRESETS.groq);
 const STORE = 'redexe.v1';
 let S = Object.assign({}, DEFAULTS);
@@ -362,6 +369,7 @@ function paintSettings() {
   $('endpoint').value = S.endpoint;
   $('model').value = S.model;
   $('gap').value = S.gap;
+  $('imgEvery').value = S.imgEvery;
   $('eyesEndpoint').value = S.eyesEndpoint || '';
   $('eyesModel').value = S.eyesModel || '';
   $('eyesKey').value = S.eyesKey || '';
@@ -377,6 +385,7 @@ function collect() {
   S.endpoint = $('endpoint').value.trim() || DEFAULTS.endpoint;
   S.model = $('model').value.trim() || DEFAULTS.model;
   S.gap = Math.max(1, Math.min(60, parseFloat($('gap').value) || 5));
+  S.imgEvery = Math.max(1, Math.min(50, parseInt($('imgEvery').value, 10) || 3));
   S.eyesEndpoint = $('eyesEndpoint').value.trim();
   S.eyesModel = $('eyesModel').value.trim();
   S.eyesKey = $('eyesKey').value.trim();
@@ -738,7 +747,7 @@ function heardText(heard, frame) {
   return t + '\nReply with the JSON only.';
 }
 
-let lastFrameKey = '', lastButtons = [], unstickTries = 0;
+let lastFrameKey = '', lastButtons = [], unstickTries = 0, tickCount = 0;
 
 /* Hash of the frame, so an unchanged screen does not cost another request. */
 function frameKey(frame) {
@@ -753,6 +762,41 @@ const EYES_PROMPT =
   'Report, in under 60 words and with no advice: (1) any dialogue text, copied exactly; ' +
   '(2) menu items visible; (3) whether a text box is open; (4) what the player is standing next to. ' +
   'If the screen is blank or in transition, say so.';
+
+/* What the screen looks like, worked out in the browser for free. This is what
+ * he gets on the calls where no picture is sent, so he is never blind. */
+function localState() {
+  const img = $('preview');
+  if (!img || !img.src || img.src.indexOf('data:image') !== 0) return '';
+  try {
+    const c = document.createElement('canvas');
+    c.width = 96; c.height = 64;
+    const x = c.getContext('2d');
+    x.drawImage(img, 0, 0, 96, 64);
+    const d = x.getImageData(0, 0, 96, 64).data;
+    let white = 0, dark = 0, bottom = 0, bottomN = 0;
+    const hues = new Set();
+    for (let y = 0; y < 64; y++) for (let i = 0; i < 96; i++) {
+      const p = (y * 96 + i) * 4;
+      const r = d[p], g = d[p + 1], b = d[p + 2];
+      const w = r > 235 && g > 235 && b > 235;
+      if (w) { white++; if (y > 44) bottom++; }
+      if (y > 44) bottomN++;
+      if (r < 40 && g < 40 && b < 40) dark++;
+      hues.add((r >> 5) + ',' + (g >> 5) + ',' + (b >> 5));
+    }
+    const n = 96 * 64;
+    const bw = bottom / Math.max(1, bottomN);
+    const bits = [];
+    bits.push(bw > 0.35 ? 'a text box is open at the bottom of the screen'
+                        : 'no text box is showing');
+    bits.push(white / n > 0.5 ? 'the screen is mostly white'
+             : dark / n > 0.5 ? 'the screen is mostly black'
+             : 'a game scene is showing');
+    bits.push('about ' + hues.size + ' distinct colours');
+    return bits.join('; ') + '.';
+  } catch (e) { return ''; }
+}
 
 async function callEyes(frame) {
   const ov = {
@@ -786,9 +830,20 @@ async function thinkApi(heard) {
   if (S.eyesModel && frame) {
     try { seen = await callEyes(frame); } catch (e) { logOnce('eyes: ' + e.message); }
   }
-  const prompt = heardText(heard, frame) + (seen ? '\n\nYour eyes report: "' + seen + '"' : '');
-  // when a separate model did the looking, the brain gets text only
-  const r = await callModel(prompt, seen ? null : frame, true);
+  // the picture costs vision tokens, and vision tokens are what trip 429.
+  // Send it when you speak, when he is stuck, or every Nth call. Otherwise a
+  // free local description goes instead.
+  tickCount++;
+  const wantPicture = heard.length > 0 || unstickTries > 0 || (tickCount % S.imgEvery === 0);
+  const picture = (seen || !wantPicture) ? null : frame;
+  let prompt = heardText(heard, frame);
+  if (seen) prompt += '\n\nYour eyes report: "' + seen + '"';
+  else if (!picture) {
+    const st = localState();
+    if (st) prompt += '\n\nYou are not being shown the picture this turn. What it looks like: ' + st +
+      ' Act from this and from what you remember of the screen.';
+  }
+  const r = await callModel(prompt, picture, true);
   const act = parseReply(r.text);
   lastApi = 'OK ' + Math.round(performance.now() - t0) + ' MS';
   history.push({ role: 'user', content: heard.length ? 'Dev: ' + heard.join(' / ') : 'Dev is silent.' },

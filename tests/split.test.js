@@ -102,6 +102,35 @@ const check = (n, ok, extra) => { if (!ok) fails++; console.log((ok ? '  PASS ' 
   check('brain model got text only (no image)', brain.every(c => !c.hasImage),
         JSON.stringify(brain.map(c => c.hasImage)));
 
+  // ---------- picture cadence: not every call should carry an image
+  calls.length = 0;
+  await page.evaluate(() => {
+    const st = JSON.parse(localStorage.getItem('redexe.v1') || '{}');
+    st.eyesModel = ''; st.eyesEndpoint = ''; st.eyesKey = '';   // one model only
+    st.model = 'brain-model'; st.imgEvery = 3; st.gap = 1;
+    localStorage.setItem('redexe.v1', JSON.stringify(st));
+  });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.evaluate(() => {
+    window.__png = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='), c => c.charCodeAt(0));
+    window.__shot = 0;
+    window.EJS_emulator = { gameManager: { screenshot: function () { window.__shot++; const a = new Uint8Array(window.__png); a[a.length - 2] = window.__shot & 0xFF; return Promise.resolve(a); }, simulateInput: function () {}, getFrameNum: function () { return 1; }, getState: function () { return new Uint8Array(8); }, saveSaveFiles: function () {} } };
+    const input = document.getElementById('rom');
+    const file = new File([new Uint8Array([1, 2, 3, 4])], 'test.gbc', { type: 'application/octet-stream' });
+    const dt = new DataTransfer(); dt.items.add(file);
+    input.files = dt.files;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await sleep(1200);
+  await page.evaluate(() => { const b = document.getElementById('startAI'); if (b) b.click(); });
+  await sleep(14000);
+
+  const withImg = calls.filter(c => c.hasImage).length;
+  const without = calls.filter(c => !c.hasImage).length;
+  check('some calls carry the picture', withImg > 0, 'with=' + withImg);
+  check('most calls do not carry the picture', without > withImg,
+        'with=' + withImg + ' without=' + without);
+
   await browser.close(); server.close();
   console.log(fails ? fails + ' FAILURE(S)' : '\nall split checks passed');
   process.exit(fails ? 1 : 0);
