@@ -82,6 +82,14 @@
   .sm{font:inherit;font-size:9px;padding:10px 12px;border:3px solid var(--ink);border-radius:4px;background:var(--light);
       color:var(--ink);cursor:pointer}
   .sm:active{background:var(--mid)}
+
+  /* nobody plays this by hand: the AI presses the buttons */
+  .ejs_virtualGamepad_parent{display:none!important}
+  /* full screen must fill the screen, not sit in a 3:2 box */
+  #stage:fullscreen{aspect-ratio:auto!important;width:100vw;height:100vh;border:0;border-radius:0;background:#000}
+  #stage:fullscreen #game{width:100vw;height:100vh;display:flex;align-items:center;justify-content:center}
+  #stage:fullscreen canvas{max-width:100vw!important;max-height:100vh!important;width:auto!important;height:auto!important}
+  #stage:fullscreen #empty{display:none}
 </style>
 </head>
 <body>
@@ -258,7 +266,7 @@ const FORMAT =
   'Keep "say" under 140 characters.';
 
 const PRESETS = {
-  groq:   { endpoint: 'https://api.groq.com/openai/v1/chat/completions', model: 'meta-llama/llama-4-scout-17b-16e-instruct' },
+  groq:   { endpoint: 'https://api.groq.com/openai/v1/chat/completions', model: 'qwen/qwen3.8-27b' },
   openai: { endpoint: 'https://api.openai.com/v1/chat/completions', model: 'gpt-4o-mini' }
 };
 /* the key tells you the provider; you should not have to pick a model */
@@ -398,7 +406,7 @@ $('rom').addEventListener('change', (e) => {
   if (!file) return;
   if (loaderAdded) { log('sys', 'the emulator can load only one ROM per page visit. reload the page to switch.'); return; }
   loaderAdded = true;
-  isGba = /\.gba$/i.test(file.name);
+  isGba = /\.(gba|zip)$/i.test(file.name);   // our artifact is a zip of a .gba
   $('stage').style.aspectRatio = isGba ? '3 / 2' : '10 / 9';
   $('empty').style.display = 'none';
   log('sys', 'loading ' + file.name + ' (' + Math.round(file.size / 1024) + ' KB)');
@@ -428,6 +436,7 @@ function adopt() {
   if (emu) return true;
   if (window.EJS_emulator && window.EJS_emulator.gameManager) {
     emu = window.EJS_emulator;
+    try { if (emu.toggleVirtualGamepad) emu.toggleVirtualGamepad(false); } catch (e) {}
     log('sys', 'emulator ready: ' + (isGba ? 'gba (mgba)' : 'game boy (gambatte)'));
     probeMemory();
     paintStatus();
@@ -548,6 +557,12 @@ async function callModel(userText, frame, withHistory) {
     });
     if (!res.ok) {
       const body = (await res.text().catch(() => '')).replace(/\s+/g, ' ').slice(0, 160);
+      if (res.status === 404 && /does not exist|not found|no access/i.test(body)) {
+        throw new Error('model "' + S.model + '" is not available on this provider. ' +
+          'For Groq use qwen/qwen3.8-27b. Open KEY and pick a model that exists.');
+      }
+      if (res.status === 401) throw new Error('key rejected (401) — paste it again under KEY, then SAVE');
+      if (res.status === 429) throw new Error('rate limited (429) — wait a moment, or the free tier is spent');
       if (res.status === 400 && useImage && /image|vision|multimodal|content/i.test(body) && !callModel.retried) {
         noVision = true; callModel.retried = true;
         log('sys', 'this model rejected the image. Red will play blind until you pick a vision model.');
