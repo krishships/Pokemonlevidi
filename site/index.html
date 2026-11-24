@@ -364,7 +364,7 @@ function detectProvider(key) {
 }
 
 const DEFAULTS = Object.assign({
-  mode: 'local', apikey: '', ocr: 'off', gap: 5, persona: DEFAULT_PERSONA,
+  mode: 'local', apikey: '', ocr: 'on', gap: 5, persona: DEFAULT_PERSONA,
   eyesModel: '',                                     // optional second Groq call that only reads the screen
   imgEvery: 3                                        // send the picture on 1 call in N, text otherwise
 }, PRESETS.groq);
@@ -882,6 +882,18 @@ function loadOcr() {
 }
 async function readScreenText() {
   if (S.ocr !== 'on') return '';
+  // dialogue only exists when the bottom band is a text box: skip OCR otherwise
+  try {
+    const img0 = $('preview');
+    if (img0 && img0.src && img0.src.indexOf('data:image') === 0) {
+      const c0 = document.createElement('canvas'); c0.width = 60; c0.height = 40;
+      const x0 = c0.getContext('2d'); x0.drawImage(img0, 0, 0, 60, 40);
+      const d0 = x0.getImageData(0, 22, 60, 18).data;
+      let w0 = 0, n0 = 0;
+      for (let i = 0; i < d0.length; i += 4) { n0++; if (d0[i] > 235 && d0[i+1] > 235 && d0[i+2] > 235) w0++; }
+      if (w0 / n0 < 0.35) return '';            // no text box, nothing to read
+    }
+  } catch (e) {}
   const img = $('preview');
   if (!img || !img.src || img.src.indexOf('data:image') !== 0) return '';
   try {
