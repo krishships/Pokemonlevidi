@@ -107,3 +107,23 @@ Needs `arm-none-eabi-gcc`, `make`, `python3`, `libpng-dev`.
 Code here: MIT. No ROM images or ripped assets are in this repository —
 the game is compiled from the public decompilation at build time. Pokémon is
 © Nintendo / Creatures / GAME FREAK. See `docs/LEGAL.md`.
+
+## Get the latest Emerald ROM (no ROM needed)
+
+Actions > **Build latest Emerald** > Run workflow. Choose `pokeemerald-expansion`
+(the "EE" base) or plain `pokeemerald`, and a branch (`master` is newest). It
+compiles the ROM from source and uploads `emerald.gba` and `emerald.map` as the
+`emerald-latest` artifact (kept 3 days). Keep this repo private: a built ROM
+contains Nintendo's assets and should not be shared.
+
+## Full screen
+
+FULL SCREEN fills the phone: game on top, chat below, and the message box stays
+above the keyboard. Landscape puts the game left and the chat right.
+
+## Save and reset
+
+Refreshing the page keeps everything: your ROM, the saved game, the key and settings,
+Red's memory and the chat. **SAVE** writes the game now (it also autosaves every minute
+and when you leave the page). **RESET** erases all of it; tap it twice within 4 seconds.
+The ROM and save live only in this browser.

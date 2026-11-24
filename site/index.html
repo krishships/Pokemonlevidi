@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=resizes-content">
 <meta name="theme-color" content="#e0f8d0">
 <title>RED.EXE</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -85,11 +85,23 @@
 
   /* nobody plays this by hand: the AI presses the buttons */
   .ejs_virtualGamepad_parent{display:none!important}
-  /* full screen must fill the screen, not sit in a 3:2 box */
-  #stage:fullscreen{aspect-ratio:auto!important;width:100vw;height:100vh;border:0;border-radius:0;background:#000}
-  #stage:fullscreen #game{width:100vw;height:100vh;display:flex;align-items:center;justify-content:center}
-  #stage:fullscreen canvas{max-width:100vw!important;max-height:100vh!important;width:auto!important;height:auto!important}
-  #stage:fullscreen #empty{display:none}
+  /* FULL SCREEN: the whole app fills the phone. Game on top, chat fills the rest, input pinned at the bottom. */
+  body.fs{max-width:none;height:100vh;height:100dvh;margin:0;overflow:hidden;display:grid;gap:8px;
+    padding:max(6px,env(safe-area-inset-top)) max(6px,env(safe-area-inset-right)) max(6px,env(safe-area-inset-bottom)) max(6px,env(safe-area-inset-left));
+    grid-template-columns:minmax(0,1fr);grid-template-rows:auto auto minmax(0,1fr) auto;
+    grid-template-areas:"stage" "bar" "log" "say"}
+  body.fs header,body.fs #status,body.fs #eyes,body.fs details{display:none}
+  body.fs #stage{grid-area:stage;margin:0;width:100%;justify-self:center}
+  body.fs .menu{grid-area:bar;margin:0;display:flex;gap:0 14px;padding:2px 10px;justify-content:space-between}
+  body.fs .menu .mi{display:none;min-height:34px;padding:4px}
+  body.fs .menu .mi.keep{display:block}
+  body.fs #log{grid-area:log;margin:0;height:auto;min-height:0}
+  body.fs #say{grid-area:say;margin:0}
+  @media (orientation:landscape){
+    body.fs{grid-template-columns:auto minmax(0,1fr);grid-template-rows:auto minmax(0,1fr) auto;
+      grid-template-areas:"stage bar" "stage log" "stage say"}
+    body.fs #stage{height:calc(100dvh - 16px);width:auto;aspect-ratio:10/9}
+  }
 </style>
 </head>
 <body>
@@ -116,11 +128,13 @@
 <input type="file" id="rom" accept=".gb,.gbc,.gba" style="display:none">
 <nav class="menu box" aria-label="Controls">
   <button class="mi" id="pick">LOAD ROM</button>
-  <button class="mi" id="startAI">WAKE RED</button>
-  <button class="mi" id="stopAI">REST</button>
-  <button class="mi" id="fs">FULL SCREEN</button>
+  <button class="mi keep" id="startAI">WAKE RED</button>
+  <button class="mi keep" id="stopAI">REST</button>
+  <button class="mi keep" id="savebtn">SAVE</button>
+  <button class="mi keep" id="fs">FULL SCREEN</button>
   <button class="mi" id="look">LOOK</button>
   <button class="mi" id="testai">TEST AI</button>
+  <button class="mi" id="reset">RESET</button>
   <button class="mi" id="apibtn">KEY</button>
 </nav>
 
@@ -164,7 +178,7 @@
     </div>
 
     <label>SECONDS BETWEEN RED'S MOVES</label>
-    <input type="text" id="gap" inputmode="numeric" placeholder="3">
+    <input type="text" id="gap" inputmode="numeric" placeholder="5">
     <div class="hint">Free API plans have rate limits. Raise this if you see errors 429.</div>
 
     <label>RED'S PERSONA</label>
@@ -293,7 +307,7 @@ function detectProvider(key) {
   return null;
 }
 
-const DEFAULTS = Object.assign({ mode: 'local', apikey: '', gap: 3, persona: DEFAULT_PERSONA }, PRESETS.groq);
+const DEFAULTS = Object.assign({ mode: 'local', apikey: '', gap: 5, persona: DEFAULT_PERSONA }, PRESETS.groq);
 const STORE = 'redexe.v1';
 let S = Object.assign({}, DEFAULTS);
 try { const raw = localStorage.getItem(STORE); if (raw) S = Object.assign(S, JSON.parse(raw)); } catch (e) {}
@@ -319,7 +333,7 @@ function collect() {
   S.apikey = $('apikey').value.trim();
   S.endpoint = $('endpoint').value.trim() || DEFAULTS.endpoint;
   S.model = $('model').value.trim() || DEFAULTS.model;
-  S.gap = Math.max(1, Math.min(60, parseFloat($('gap').value) || 3));
+  S.gap = Math.max(1, Math.min(60, parseFloat($('gap').value) || 5));
   S.persona = $('persona').value.trim() || DEFAULT_PERSONA;
 }
 function setMode(m) { S.mode = m; persist(); paintSettings(); }
@@ -365,14 +379,14 @@ $('apibtn').addEventListener('click', () => { openSettings(); setTimeout(() => $
 let emu = null, isGba = false, loaderAdded = false;
 let awake = false, loopRunning = false, nudgeFn = null, extraWait = 0, apiFails = 0;
 let inputsSent = 0, framesSeen = 0, lastHash = null, stuck = 0, lastFrame = null;
-let noVision = false, lastApi = 'NOT TESTED';
+let noVision = false, lastApi = 'NOT TESTED', slow = 0;
 let mem = { ok: false, size: 0 };
 let pending = [];
 let history = [];
 const pressed = new Set();
 
 /* ================================================================= log */
-function log(who, text) {
+function addLine(who, text) {
   const el = document.createElement('div');
   el.className = 'msg ' + who;
   const label = who === 'you' ? 'DEV (you)' : who === 'him' ? 'RED' : '';
@@ -382,6 +396,21 @@ function log(who, text) {
   const box = $('log');
   box.insertBefore(el, box.querySelector('.arrow'));
   box.scrollTop = box.scrollHeight;
+}
+
+let logLines = [];
+function persistChat() {
+  try { localStorage.setItem('redexe.chat', JSON.stringify({ history: history.slice(-16), log: logLines.slice(-40) })); } catch (e) {}
+}
+function log(who, text) { addLine(who, text); logLines.push([who, text]); if (logLines.length > 80) logLines.shift(); persistChat(); }
+function restoreChat() {
+  try {
+    const c = JSON.parse(localStorage.getItem('redexe.chat') || 'null');
+    if (!c) return false;
+    if (Array.isArray(c.history)) history = c.history;
+    if (Array.isArray(c.log) && c.log.length) { c.log.forEach(([w, t]) => { addLine(w, t); logLines.push([w, t]); }); return true; }
+  } catch (e) {}
+  return false;
 }
 
 function paintStatus() {
@@ -398,12 +427,75 @@ function paintStatus() {
   ].join('<br>');
 }
 
+/* ======================================================== save / reset */
+function idb() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open('redexe', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('kv');
+    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+  });
+}
+async function idbPut(k, v) { const d = await idb(); return new Promise((res, rej) => { const t = d.transaction('kv', 'readwrite'); t.objectStore('kv').put(v, k); t.oncomplete = () => res(); t.onerror = () => rej(t.error); }); }
+async function idbGet(k) { const d = await idb(); return new Promise((res, rej) => { const q = d.transaction('kv').objectStore('kv').get(k); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); }); }
+async function idbClear() { const d = await idb(); return new Promise((res, rej) => { const t = d.transaction('kv', 'readwrite'); t.objectStore('kv').clear(); t.oncomplete = () => res(); t.onerror = () => rej(t.error); }); }
+
+let romName = '';
+async function saveGame(quiet) {
+  const gm = emu && emu.gameManager;
+  if (!gm || typeof gm.getState !== 'function') { if (!quiet) log('sys', 'nothing to save yet. load a ROM first.'); return false; }
+  try {
+    const st = gm.getState();
+    if (!st || !st.length) throw new Error('empty state');
+    await idbPut('state', { rom: romName, data: st });
+    try { if (gm.saveSaveFiles) gm.saveSaveFiles(); } catch (e) {}
+    persistChat();
+    if (!quiet) log('sys', 'saved (' + Math.round(st.length / 1024) + ' KB). reloading the page keeps this.');
+    return true;
+  } catch (e) { if (!quiet) log('sys', 'could not save: ' + e.message); return false; }
+}
+async function restoreState() {
+  try {
+    const rec = await idbGet('state');
+    if (!rec || !rec.data || rec.rom !== romName) return;
+    await sleep(2500);                                   // let the game finish booting first
+    if (emu.gameManager.loadState) { emu.gameManager.loadState(rec.data); log('sys', 'your saved game was restored'); }
+  } catch (e) {}
+}
+$('savebtn').addEventListener('click', () => saveGame(false));
+setInterval(() => { if (emu) saveGame(true); }, 60000);   // quiet autosave
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && emu) saveGame(true); });
+
+let resetArm = 0;
+$('reset').addEventListener('click', async () => {
+  if (Date.now() - resetArm > 4000) {
+    resetArm = Date.now();
+    $('reset').textContent = 'TAP AGAIN';
+    setTimeout(() => { $('reset').textContent = 'RESET'; }, 4000);
+    log('sys', 'tap RESET again within 4 seconds to erase EVERYTHING: ROM, saved game, key, settings, chat.');
+    return;
+  }
+  awake = false; nudge();
+  try { await idbClear(); } catch (e) {}
+  try {
+    const dbs = indexedDB.databases ? await indexedDB.databases() : [];
+    await Promise.all(dbs.filter(d => /emulatorjs/i.test(d.name || '')).map(d => new Promise(r => {
+      const q = indexedDB.deleteDatabase(d.name); q.onsuccess = q.onerror = q.onblocked = () => r();
+    })));
+  } catch (e) {}
+  try { localStorage.removeItem(STORE); localStorage.removeItem('redexe.chat'); } catch (e) {}
+  location.reload();
+});
+
 /* ============================================================ emulator */
 $('pick').addEventListener('click', () => $('rom').click());
 
 $('rom').addEventListener('change', (e) => {
   const file = e.target.files && e.target.files[0];
-  if (!file) return;
+  if (file) startRom(file, false);
+});
+
+function startRom(file, restored) {
+  romName = file.name;
   if (loaderAdded) { log('sys', 'the emulator can load only one ROM per page visit. reload the page to switch.'); return; }
   loaderAdded = true;
   isGba = /\.(gba|zip)$/i.test(file.name);   // our artifact is a zip of a .gba
@@ -430,7 +522,8 @@ $('rom').addEventListener('change', (e) => {
   s.src = window.EJS_pathtodata + 'loader.js';
   s.onerror = () => log('sys', 'could not load the emulator from the CDN');
   document.body.appendChild(s);
-});
+  if (!restored) idbPut('rom', { name: file.name, blob: file }).catch(() => {});
+}
 
 function adopt() {
   if (emu) return true;
@@ -440,6 +533,7 @@ function adopt() {
     log('sys', 'emulator ready: ' + (isGba ? 'gba (mgba)' : 'game boy (gambatte)'));
     probeMemory();
     paintStatus();
+    restoreState();
     return true;
   }
   return false;
@@ -484,7 +578,7 @@ function frameFromBytes(bytes) {
     const img = new Image();
     img.onload = () => {
       try {
-        const k = Math.max(1, Math.min(3, Math.floor(480 / img.width)));
+        const k = Math.max(1, Math.min(2, Math.floor(320 / img.width) || 1));
         const c = document.createElement('canvas');
         c.width = img.width * k; c.height = img.height * k;
         const cx = c.getContext('2d');
@@ -562,14 +656,21 @@ async function callModel(userText, frame, withHistory) {
           'For Groq use qwen/qwen3.8-27b. Open KEY and pick a model that exists.');
       }
       if (res.status === 401) throw new Error('key rejected (401) — paste it again under KEY, then SAVE');
-      if (res.status === 429) throw new Error('rate limited (429) — wait a moment, or the free tier is spent');
       if (res.status === 400 && useImage && /image|vision|multimodal|content/i.test(body) && !callModel.retried) {
         noVision = true; callModel.retried = true;
         log('sys', 'this model rejected the image. Red will play blind until you pick a vision model.');
         try { return await callModel(userText, null, withHistory); } finally { callModel.retried = false; }
       }
-      const ra = parseFloat(res.headers.get('retry-after'));
-      throw apiError('HTTP ' + res.status + ' ' + body, res.status === 429 ? (ra > 0 ? ra * 1000 : 15000) : 0);
+      if (res.status === 429) {
+        const ra = parseFloat(res.headers.get('retry-after'));
+        const hint = /try again in ([\d.]+)\s*(ms|s|m)/i.exec(body);   // Groq says "try again in 7.2s"
+        let ms = ra > 0 ? ra * 1000 : 0;
+        if (!ms && hint) ms = parseFloat(hint[1]) * (hint[2] === 'ms' ? 1 : hint[2] === 'm' ? 60000 : 1000);
+        const err = apiError('rate limited (429). waiting ' + Math.round((ms || 15000) / 1000) + ' s', Math.max(3000, Math.min(120000, ms || 15000)));
+        err.rate = true;
+        throw err;
+      }
+      throw apiError('HTTP ' + res.status + ' ' + body);
     }
     const data = await res.json();
     const msg = data.choices && data.choices[0] && data.choices[0].message;
@@ -597,6 +698,7 @@ async function thinkApi(heard) {
   history.push({ role: 'user', content: heard.length ? 'Dev: ' + heard.join(' / ') : 'Dev is silent.' },
                { role: 'assistant', content: JSON.stringify(act) });
   if (history.length > 16) history = history.slice(-16);
+  persistChat();
   if (act.say) log('him', act.say);
   await runButtons(act.buttons);
 }
@@ -614,16 +716,30 @@ async function thinkLocal(heard) {
   await runButtons(Array(1 + Math.floor(Math.random() * 3)).fill(d));
 }
 
+let lastErr = '', lastErrAt = 0;
+function logOnce(msg) {            // do not repeat the same error line every few seconds
+  const now = Date.now();
+  if (msg === lastErr && now - lastErrAt < 60000) return;
+  lastErr = msg; lastErrAt = now; log('sys', msg);
+}
 async function tick() {
   const heard = pending.splice(0);
   if (useApi()) {
-    try { await thinkApi(heard); apiFails = 0; return; }
+    try { await thinkApi(heard); apiFails = 0; slow = Math.max(0, slow - 0.5); return; }
     catch (err) {
+      lastApi = err.rate ? '429 WAIT' : 'ERROR';
+      logOnce('api: ' + err.message);
+      if (err.rate) {
+        slow = Math.min(20, slow + 4);                 // after a 429, play slower for a while
+        extraWait = err.retryMs;
+        pending.unshift(...heard);                     // he still hears what you said
+        return;                                        // stand still, do not wander at random
+      }
       apiFails++;
-      lastApi = 'ERROR';
-      log('sys', 'api failed: ' + err.message);
-      extraWait = err.retryMs || Math.min(30000, 3000 * apiFails);
+      extraWait = Math.min(30000, 3000 * apiFails);
       if (apiFails >= 5) { log('sys', 'five errors in a row. Red rests. press TEST AI to see the exact error.'); rest(); return; }
+      pending.unshift(...heard);
+      return;
     }
   }
   await thinkLocal(heard);
@@ -647,7 +763,7 @@ async function loop() {
     try { await tick(); } catch (err) { log('sys', 'error: ' + err.message); extraWait = 5000; }
     paintStatus();
     if (!awake) break;
-    await sleepOrNudge(Math.max(S.gap * 1000, extraWait));
+    await sleepOrNudge(Math.max((S.gap + slow) * 1000, extraWait));
   }
   loopRunning = false;
 }
@@ -680,12 +796,24 @@ function speak() {
   if (!awake) { if (!wake()) pending.pop(); }
   else nudge();                      // answer now, do not wait out the pause
 }
+function setFs(on) {
+  document.body.classList.toggle('fs', on);
+  $('fs').textContent = on ? 'EXIT FULL' : 'FULL SCREEN';
+  // the stage keeps the game's own ratio (10:9 or 3:2); in landscape the CSS above sizes it by height
+  if (on) $('log').scrollTop = $('log').scrollHeight;
+}
 $('fs').addEventListener('click', async () => {
-  const stage = document.getElementById('stage') || document.querySelector('canvas')?.parentElement;
+  const on = !document.body.classList.contains('fs');
+  setFs(on);
   try {
-    if (!document.fullscreenElement) await (stage || document.documentElement).requestFullscreen();
-    else await document.exitFullscreen();
-  } catch (e) { log('sys', 'full screen blocked by the browser'); }
+    const el = document.documentElement;
+    if (on && !document.fullscreenElement && el.requestFullscreen) await el.requestFullscreen();
+    else if (!on && document.fullscreenElement) await document.exitFullscreen();
+  } catch (e) { /* layout still works without the browser's fullscreen */ }
+});
+document.addEventListener('fullscreenchange', () => {
+  // the phone's back gesture leaves fullscreen: drop the layout too
+  if (!document.fullscreenElement && document.body.classList.contains('fs')) setFs(false);
 });
 
 $('send').addEventListener('click', speak);
@@ -693,7 +821,15 @@ $('whisper').addEventListener('keydown', (e) => { if (e.key === 'Enter') speak()
 
 /* If a ROM is dropped next to the page (emerald.gba, git-ignored), load it
    without making the user pick a file every time. A 404 is not an error. */
+async function bootRestore() {
+  try {
+    const r = await idbGet('rom');
+    if (r && r.blob) { log('sys', 'found your ROM from last time: ' + r.name); startRom(new File([r.blob], r.name), true); }
+  } catch (e) {}
+}
 (async function autoLoadRom() {
+  await bootRestore();
+  if (loaderAdded) return;
   for (const name of ['emerald.gba', 'roms/emerald.gba']) {
     try {
       const r = await fetch(name, { method: 'HEAD' });
@@ -750,7 +886,7 @@ $('listmodels').addEventListener('click', async () => {
 
 /* =============================================================== boot */
 paintSettings();
-log('sys', '1. LOAD ROM (your own file)\n2. KEY: paste key, pick GROQ, SAVE\n3. TEST AI\n4. WAKE RED, then talk to him.');
+if (!restoreChat()) log('sys', '1. LOAD ROM (your own file)\n2. KEY: paste key, pick GROQ, SAVE\n3. TEST AI\n4. WAKE RED, then talk to him.');
 </script>
 </body>
 </html>
