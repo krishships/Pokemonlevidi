@@ -221,7 +221,9 @@ const check = (n, ok, extra) => { if (!ok) fails++; console.log((ok ? '  PASS ' 
     console.log('  NO CALLS. emu=' + why.emu + ' settings=' + String(why.settings).slice(0, 120));
     console.log('  page log: ' + why.log.split('\n').filter(Boolean).slice(-8).join(' | '));
   }
-  await waitFor(() => calls.some(c => c.hasImage) && calls.some(c => !c.hasImage), 35000);
+  // the build throttles to a token budget, so calls are ~15s apart: give it long
+  // enough to see both kinds rather than failing on a short window
+  await waitFor(() => calls.some(c => c.hasImage) && calls.some(c => !c.hasImage), 120000);
 
   const withImg = calls.filter(c => c.hasImage).length;
   const without = calls.filter(c => !c.hasImage).length;
