@@ -236,9 +236,10 @@ body.fs{height:calc(100dvh - var(--kb, 0px));grid-template-columns:auto minmax(0
     <label for="imgEvery">PICTURE EVERY N CALLS</label>
     <input type="text" id="imgEvery" inputmode="numeric" placeholder="3">
     <div class="hint">Vision tokens are what runs you into 429. Every turn he already gets the
-      screen decoded to text — a 24x16 letter grid, the borders, whether a text box is open. The
-      real picture is only extra. Set <b>0</b> to never send it and play text-only, <b>1</b> to
-      always send it.</div>
+      screen decoded to text — a 30x20 grid with one letter per 8x8 tile, what is around him, which
+      edges have exits, and whether a text box is open. The real picture is only extra, and it is
+      sent alongside the text, not instead of it. Set <b>0</b> to never send it and play text-only,
+      <b>1</b> to always send it.</div>
 
     <label>SECONDS BETWEEN RED'S MOVES</label>
     <input type="text" id="gap" inputmode="numeric" placeholder="5">
