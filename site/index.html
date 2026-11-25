@@ -236,10 +236,10 @@ body.fs{height:calc(100dvh - var(--kb, 0px));grid-template-columns:auto minmax(0
     <label for="imgEvery">PICTURE EVERY N CALLS</label>
     <input type="text" id="imgEvery" inputmode="numeric" placeholder="3">
     <div class="hint">Vision tokens are what runs you into 429. Every turn he already gets the
-      screen decoded to text — a 30x20 grid with one letter per 8x8 tile, what is around him, which
-      edges have exits, and whether a text box is open. The real picture is only extra, and it is
-      sent alongside the text, not instead of it. Set <b>0</b> to never send it and play text-only,
-      <b>1</b> to always send it.</div>
+      screen decoded to text — a 30x20 grid, what is around him, which edges have exits, and the
+      dialogue box read out. That text is always sent. A picture is optional and expensive: about
+      1,500 of the 8,000 free tokens per minute, so <b>0 (text only)</b> is the default and gives
+      roughly three times as many turns. Set <b>1</b> only if you want him to see sprites and colour.</div>
 
     <label>SECONDS BETWEEN RED'S MOVES</label>
     <input type="text" id="gap" inputmode="numeric" placeholder="5">
@@ -426,7 +426,8 @@ const DEFAULTS = Object.assign({
   mode: 'local', apikey: '', ocr: 'on', gap: 2, persona: DEFAULT_PERSONA,
   goal: 'Get out of this room, then find out where you are and what is going on.',
   eyesModel: '',                                     // optional second Groq call that only reads the screen
-  imgEvery: 3                                        // send the picture on 1 call in N, text otherwise
+  imgEvery: 0                                        // 0 = text only. The decoder carries the screen;
+                                                     // a picture costs ~1500 of the 8000 free tokens/min
 }, PRESETS.groq);
 const STORE = 'redexe.v1';
 let S = Object.assign({}, DEFAULTS);
@@ -445,7 +446,7 @@ try {
 S.endpoint = DEFAULTS.endpoint;
 { const g = Number(S.gap), n = Number(S.imgEvery);           // storage can hold anything
   S.gap = Number.isFinite(g) ? Math.max(1, Math.min(30, g)) : 5;
-  S.imgEvery = Number.isFinite(n) ? Math.max(0, Math.min(50, n)) : 3; }
+  S.imgEvery = Number.isFinite(n) ? Math.max(0, Math.min(50, n)) : 0; }
 {
   const fixed = normaliseModel(S.model);
   if (fixed !== S.model) {
@@ -502,7 +503,7 @@ function collect() {
   S.endpoint = proxyEndpoint || ($('endpoint').value.trim() || DEFAULTS.endpoint);
   S.model = normaliseModel($('model').value);
   S.gap = Math.max(1, Math.min(60, parseFloat($('gap').value) || 5));
-  { const n = parseInt($('imgEvery').value, 10); S.imgEvery = Number.isFinite(n) ? Math.max(0, Math.min(50, n)) : 3; }
+  { const n = parseInt($('imgEvery').value, 10); S.imgEvery = Number.isFinite(n) ? Math.max(0, Math.min(50, n)) : 0; }
   S.eyesModel = $('eyesModel').value;
   S.ocr = $('ocr').value;
   S.persona = $('persona').value.trim() || DEFAULT_PERSONA;
@@ -629,8 +630,8 @@ function paintStatus() {
     'SCREEN ' + (lastScreenKind || '—') + (menuTurns >= 2 ? ' (' + menuTurns + ' turns)' : ''),
     'STUCK ' + (stuckCount >= 3 ? '<span class="no">' + stuckCount + ' turns</span>' : stuckCount + ' turns'),
     'MAP MEMORY ' + seenGrids.size + ' views',
-    'PICTURE every ' + (S.imgEvery === 0 ? 'never (text only)' :
-      (imgBackoff > 1 ? (S.imgEvery * imgBackoff) + ' (backed off from ' + S.imgEvery + ')' : S.imgEvery)),
+    'PICTURE ' + (S.imgEvery === 0 ? 'off — text only'
+      : 'every ' + (imgBackoff > 1 ? (S.imgEvery * imgBackoff) + ' (backed off from ' + S.imgEvery + ')' : String(S.imgEvery))),
     'API ' + lastApi
   ].join('<br>');
 }
@@ -1097,18 +1098,10 @@ function loadOcr() {
 }
 async function readScreenText() {
   if (S.ocr !== 'on') return '';
-  // dialogue only exists when the bottom band is a text box: skip OCR otherwise
-  try {
-    const img0 = $('preview');
-    if (img0 && img0.src && img0.src.indexOf('data:image') === 0) {
-      const c0 = document.createElement('canvas'); c0.width = 60; c0.height = 40;
-      const x0 = c0.getContext('2d'); x0.drawImage(img0, 0, 0, 60, 40);
-      const d0 = x0.getImageData(0, 22, 60, 18).data;
-      let w0 = 0, n0 = 0;
-      for (let i = 0; i < d0.length; i += 4) { n0++; if (d0[i] > 235 && d0[i+1] > 235 && d0[i+2] > 235) w0++; }
-      if (w0 / n0 < 0.35) return '';            // no text box, nothing to read
-    }
-  } catch (e) {}
+  // Trust the decoder's own box test. The old second gate downscaled the frame
+  // 4x first, which blurred the glyphs into the fill and made it fail on the
+  // very frame it existed for (0.284 against a 0.35 cut).
+  if (lastScreenKind !== 'box') return '';
   const img = $('preview');
   if (!img || !img.src || img.src.indexOf('data:image') !== 0) return '';
   try {
@@ -1124,8 +1117,8 @@ async function readScreenText() {
     const x = c.getContext('2d'); x.imageSmoothingEnabled = false;
     x.drawImage(img, 0, y0, sw, sh - y0, 0, 0, c.width, c.height);
     const { data } = await w.recognize(c);
-    const t = String(data.text || '').replace(/[^\w\s.,!?'":;-]/g, ' ').replace(/\s+/g, ' ').trim();
-    return t.length >= 4 ? t.slice(0, 200) : '';
+    const t = String(data.text || '').replace(/[^\w\s.,!?'":;\-éÉèÈàÀâÂôÔûÛîÎçÇñÑ]/g, ' ').replace(/\s+/g, ' ').trim();
+    return t.length >= 1 ? t.slice(0, 200) : '';
   } catch (e) { return ''; }
 }
 
@@ -1396,9 +1389,7 @@ async function thinkApi(heard) {
               'Whatever you are doing is not working. Do something clearly different this turn.';
   }
   if (seen) prompt += '\n\nYour eyes report: "' + seen + '"';
-  else if (!picture) {
-    // the 30x20 decoder above already describes this screen; a second, coarser
-    // description of the same frame was 68% of the prompt for no new information
+  else {
     const ocrText = await readScreenText();
     if (ocrText) logOnce('reading the text box: "' + ocrText.slice(0, 60) + '"');
     else if (S.ocr !== 'on' && lastScreenKind === 'box') {

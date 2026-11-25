@@ -165,6 +165,7 @@ function check(name, cond, detail) {
   await page.evaluate(() => {
     const s = JSON.parse(localStorage.getItem('redexe.v1') || '{}');
     s.mode = 'api'; s.apikey = 'test-key-123'; s.model = 'gpt-4o-mini'; s.gap = 1;
+    s.imgEvery = 1;                    // this phase tests the picture path explicitly
     // a stale endpoint in storage must be ignored: Groq is the only provider
     s.endpoint = 'https://api.example.com/v1/chat/completions';
     localStorage.setItem('redexe.v1', JSON.stringify(s));
