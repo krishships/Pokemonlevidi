@@ -231,8 +231,11 @@ const check = (n, ok, extra) => { if (!ok) fails++; console.log((ok ? '  PASS ' 
   check('not every call carries the picture', without > 0,
         'with=' + withImg + ' without=' + without);
   const textOnly = calls.filter(c => !c.hasImage);
-  check('a text-only call carries the decoded grid',
-        textOnly.some(c => /Grid 30x20, one letter per 8x8 pixel cell/.test(c.text)),
+  // once 25+ tiles are known the page replaces the letter grid with the learned
+  // tile map, so accept either: both are a decoded grid
+  check('a text-only call carries a decoded grid',
+        textOnly.some(c => /Grid 30x20, one letter per 8x8 pixel cell/.test(c.text) ||
+                           /Learned tile map below replaces the letter grid/.test(c.text)),
         'checked ' + textOnly.length + ' text calls');
   check('a text-only call says what is around the player',
         textOnly.some(c => /Around you: up [A-Za-z?]+, down [A-Za-z?]+, left [A-Za-z?]+, right [A-Za-z?]+/.test(c.text)));
