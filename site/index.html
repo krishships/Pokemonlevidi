@@ -195,7 +195,7 @@ body.fs{height:calc(100dvh - var(--kb, 0px));grid-template-columns:auto minmax(0
 
     <label>PRESET</label>
     <div class="row" style="margin-top:0">
-      <button class="sm" id="presetGroq">GROQ (only provider)</button>
+      <button class="sm" id="presetGroq">GROQ · GEMINI</button>
     </div>
 
     <label for="apikey">API KEY</label>
@@ -221,7 +221,8 @@ body.fs{height:calc(100dvh - var(--kb, 0px));grid-template-columns:auto minmax(0
       <option value="">none — the brain looks at the picture itself</option>
       <option value="qwen/qwen3.8-27b">qwen/qwen3.8-27b — a second call reads the screen</option>
     </select>
-    <div class="hint">Same Groq key and endpoint. Nothing else to fill in.</div>
+    <div class="hint">Groq keys start with gsk_. Gemini keys (aistudio.google.com/apikey) start with
+AIza — paste either one and the endpoint and model switch to match.</div>
     <div class="row">
       <button class="sm" id="listmodels">LIST MODELS</button>
       <button class="sm" id="tilesSave">SAVE TILES</button>
@@ -391,6 +392,8 @@ const FORMAT =
 
 const PRESETS = {
   groq:   { endpoint: 'https://api.groq.com/openai/v1/chat/completions', model: 'qwen/qwen3.8-27b' },
+  gemini: { endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent',
+            model: 'gemini-3.8-flash' },
   _unused: {}
 };
 /* the key tells you the provider; you should not have to pick a model */
@@ -406,13 +409,19 @@ function showKeyUrl(provider) {
   el.innerHTML = 'get a key: <a href="' + u + '" target="_blank" rel="noopener">' + u.replace(/^https:\/\//, '') + '</a>';
 }
 
+function isGemini(ep, model) {
+  return /generativelanguage\.googleapis\.com/.test(ep || '') || /^gemini/i.test(model || '');
+}
 function detectProvider(key) {
   const k = String(key || '').trim();
   if (/^gsk_/.test(k)) return 'groq';
-  if (/^AIza[0-9A-Za-z_-]{20,}/.test(k)) return null;   // a Google key: not supported any more
-  if (/^sk-or-v1-/.test(k)) return null;               // OpenRouter: not supported any more
+  if (/^AIza[0-9A-Za-z_-]{20,}/.test(k)) return 'gemini';   // Google AI Studio key
   return null;
 }
+/* Gemini speaks a different dialect: contents/parts instead of messages, and the
+ * key goes in a header rather than a bearer token. */
+const GEMINI_EP = (model) => 'https://generativelanguage.googleapis.com/v1beta/models/' +
+  encodeURIComponent(model) + ':generateContent';
 
 const BUILD = '__BUILD__';        // stamped with the commit by CI
 
@@ -421,6 +430,7 @@ const BUILD = '__BUILD__';        // stamped with the commit by CI
  * like a bad key. */
 function normaliseModel(m) {
   const t = String(m || '').trim();
+  if (/^gemini[-\w.]*$/i.test(t)) return t;               // Gemini ids have no slash
   return (t.length >= 5 && t.indexOf('/') > 0) ? t : PRESETS.groq.model;
 }
 
@@ -521,14 +531,17 @@ function keyDetect() {
   const p = detectProvider(k);
   const hint = $('keyhint');
   if (hint) hint.textContent = p
-    ? 'detected: groq — endpoint and model set to match'
+    ? 'detected: ' + p + ' — endpoint and model set to match'
     : (k ? 'that is not a Groq key. Groq keys start with gsk_ — get one at console.groq.com/keys' : '');
   if (p) showKeyUrl(p);
   if (!p) return;
   const preset = PRESETS[p];
   if (!preset) return;
   $('endpoint').value = preset.endpoint;
-  if (!$('model').value || normaliseModel($('model').value) !== $('model').value) {
+  // the model must belong to the provider the key belongs to, or the request
+  // goes to Gemini asking for a Groq model id
+  const curGem = isGemini(S.endpoint, $('model').value);
+  if (!$('model').value || (p === 'gemini') !== curGem) {
     $('model').value = preset.model;
   }
   // one paste is the whole setup: API brain on, settings saved, nothing to press
@@ -964,18 +977,42 @@ async function callModel(userText, frame, withHistory, ov) {
   if (withHistory) for (const h of history.slice(-2)) msgs.push(h);
   msgs.push({ role: 'user', content });
 
+  const gem = isGemini(EP, MODEL);
   const slot = await tpmWait(JSON.stringify(msgs).length / 3.5 + 170 + (useImage ? 1500 : 0));
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 20000);
+
+  let url = EP, headers, payload;
+  if (gem) {
+    const parts = [{ text: userText }];
+    if (useImage) {
+      const m = /^data:(image\/[a-z]+);base64,(.*)$/i.exec(frame || '');
+      if (m) parts.push({ inline_data: { mime_type: m[1], data: m[2] } });
+    }
+    const contents = [];
+    if (withHistory) for (const h of history.slice(-2)) {
+      contents.push({ role: h.role === 'assistant' ? 'model' : 'user',
+                      parts: [{ text: typeof h.content === 'string' ? h.content : '' }] });
+    }
+    contents.push({ role: 'user', parts });
+    url = GEMINI_EP(MODEL);
+    headers = { 'Content-Type': 'application/json', 'x-goog-api-key': KEY };
+    payload = {
+      contents,
+      systemInstruction: { parts: [{ text: (ov && ov.system) || (S.persona + FORMAT) }] },
+      generationConfig: { maxOutputTokens: 220, temperature: 0.6,
+                          responseMimeType: (ov && ov.plain) ? 'text/plain' : 'application/json' }
+    };
+  } else {
+    headers = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + KEY };
+    payload = Object.assign(
+      { model: MODEL, max_tokens: 170, temperature: 0.6, messages: msgs },
+      (ov && ov.plain) ? {} : providerExtras(EP, MODEL)
+    );
+  }
   try {
-    const res = await fetch(EP, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + KEY },
-      signal: ctrl.signal,
-      body: JSON.stringify(Object.assign(
-        { model: MODEL, max_tokens: 170, temperature: 0.6, messages: msgs },
-        (ov && ov.plain) ? {} : providerExtras(EP, MODEL)
-      ))
+    const res = await fetch(url, {
+      method: 'POST', headers, signal: ctrl.signal, body: JSON.stringify(payload)
     });
     if (!res.ok) {
       const body = (await res.text().catch(() => '')).replace(/\s+/g, ' ').slice(0, 160);
@@ -1009,8 +1046,19 @@ async function callModel(userText, frame, withHistory, ov) {
     }
     const data = await res.json();
     if (data.usage && data.usage.total_tokens) slot.n = data.usage.total_tokens;
-    const msg = data.choices && data.choices[0] && data.choices[0].message;
-    const text = (msg && msg.content) || '';
+    if (data.usageMetadata && data.usageMetadata.totalTokenCount) slot.n = data.usageMetadata.totalTokenCount;
+    let text = '';
+    if (gem) {
+      const cand = data.candidates && data.candidates[0];
+      const parts = cand && cand.content && cand.content.parts;
+      text = Array.isArray(parts) ? parts.map(p => p.text || '').join('') : '';
+      if (!text && data.promptFeedback && data.promptFeedback.blockReason) {
+        throw apiError('Gemini blocked the request (' + data.promptFeedback.blockReason + ')');
+      }
+    } else {
+      const msg = data.choices && data.choices[0] && data.choices[0].message;
+      text = (msg && msg.content) || '';
+    }
     if (!text.trim()) throw apiError('the model returned an empty reply (it may have spent its tokens thinking). Try the other model in MODEL.');
     return { text, sentImage: useImage };
   } catch (err) {
