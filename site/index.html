@@ -423,7 +423,7 @@ function normaliseModel(m) {
 }
 
 const DEFAULTS = Object.assign({
-  mode: 'local', apikey: '', ocr: 'on', gap: 2, persona: DEFAULT_PERSONA,
+  mode: 'local', apikey: '', ocr: 'on', gap: 1, persona: DEFAULT_PERSONA,
   goal: 'Get out of this room, then find out where you are and what is going on.',
   eyesModel: '',                                     // optional second Groq call that only reads the screen
   imgEvery: 0                                        // 0 = text only. The decoder carries the screen;
@@ -445,7 +445,7 @@ try {
  * how a POST ended up at a static host and came back "405 Not Allowed". */
 S.endpoint = DEFAULTS.endpoint;
 { const g = Number(S.gap), n = Number(S.imgEvery);           // storage can hold anything
-  S.gap = Number.isFinite(g) ? Math.max(1, Math.min(30, g)) : 5;
+  S.gap = Number.isFinite(g) ? Math.max(1, Math.min(30, g)) : 1;
   S.imgEvery = Number.isFinite(n) ? Math.max(0, Math.min(50, n)) : 0; }
 {
   const fixed = normaliseModel(S.model);
@@ -502,7 +502,7 @@ function collect() {
   S.apikey = $('apikey').value.trim();
   S.endpoint = proxyEndpoint || ($('endpoint').value.trim() || DEFAULTS.endpoint);
   S.model = normaliseModel($('model').value);
-  S.gap = Math.max(1, Math.min(60, parseFloat($('gap').value) || 5));
+  S.gap = Math.max(1, Math.min(60, parseFloat($('gap').value) || 1));
   { const n = parseInt($('imgEvery').value, 10); S.imgEvery = Number.isFinite(n) ? Math.max(0, Math.min(50, n)) : 0; }
   S.eyesModel = $('eyesModel').value;
   S.ocr = $('ocr').value;
@@ -1516,7 +1516,12 @@ async function loop() {
     try { await tick(); } catch (err) { log('sys', 'error: ' + err.message); extraWait = 5000; }
     paintStatus();
     if (!awake) break;
-    await sleepOrNudge(Math.max((S.gap + slow) * 1000, extraWait));
+    // Only wait as long as the API needs. With no 429 and no extra backoff, the
+    // next tick can start as soon as the presses have landed: the decoder reads
+    // the frame at the top of the tick, so nothing is stale.
+    const base = (S.gap + slow) * 1000;
+    const quick = (slow === 0 && apiFails === 0 && extraWait === 0) ? base * 0.4 : base;
+    await sleepOrNudge(Math.max(quick, extraWait, 300));
   }
   loopRunning = false;
 }
