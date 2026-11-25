@@ -1,4 +1,5 @@
 PetalburgWoods_MapScripts::
+	map_script MAP_SCRIPT_ON_TRANSITION, LevidiRed_OnTransition_PetalburgWoods
 	.byte 0
 
 PetalburgWoods_EventScript_DevonResearcherLeft::

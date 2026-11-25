@@ -185,6 +185,20 @@
       "trainer_sight_or_berry_tree_id": "0",
       "script": "PetalburgWoods_EventScript_Girl",
       "flag": "0"
+    },
+    {
+      "local_id": "LOCALID_LEVIDI_RED_WOODS",
+      "graphics_id": "OBJ_EVENT_GFX_RED",
+      "x": 10,
+      "y": 18,
+      "elevation": 3,
+      "movement_type": "MOVEMENT_TYPE_FACE_DOWN",
+      "movement_range_x": 0,
+      "movement_range_y": 0,
+      "trainer_type": "TRAINER_TYPE_NONE",
+      "trainer_sight_or_berry_tree_id": "0",
+      "script": "LevidiRed_EventScript_RedWoods",
+      "flag": "FLAG_HIDE_LEVIDI_RED_WOODS"
     }
   ],
   "warp_events": [

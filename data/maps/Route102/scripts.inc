@@ -1,4 +1,5 @@
 Route102_MapScripts::
+	map_script MAP_SCRIPT_ON_FRAME_TABLE, LevidiRed_OnFrame_Route102
 	.byte 0
 
 Route102_EventScript_LittleBoy::
