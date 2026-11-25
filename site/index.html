@@ -1201,12 +1201,31 @@ function rle(row) {
    The table persists and can be exported/imported (SAVE TILES / LOAD TILES). */
 const V = (() => {
   const W = 240, H = 160, CW = 15, CH = 10;
-  const PC = { x: 7, y: 5 };                       // player's feet tile; change if the '@' is off
+  // A 16x32 sprite with its feet at y=80 spans y 48-79, i.e. rows 3 and 4 of a
+  // 16px grid. The feet cell is row 4, not 5: with 5 every vertical step taught
+  // the map the tile one beyond the one actually stepped on.
+  const PC = { x: 7, y: 4 };
   const DIR = { UP: [0, -1], DOWN: [0, 1], LEFT: [-1, 0], RIGHT: [1, 0] };
-  const KEY = 'redexe.tiles.v1';
+  // Keyed by the ROM and the map: a table learned in FireRed's rooms must never
+  // be applied to Emerald's floors, and one map's tiles must not decide another's.
+  let scope = 'default';
+  const setScope = (romName, mapId) => {
+    const next = (romName || 'rom') + ':' + (mapId || 'map');
+    if (next === scope) return;
+    scope = next;
+    try { table = JSON.parse(localStorage.getItem(KEY()) || '{}') || {}; } catch (e) { table = {}; }
+  };
+  const KEY = () => 'redexe.tiles.v2:' + scope;
   let table = {};
-  try { table = JSON.parse((typeof localStorage !== 'undefined' && localStorage.getItem(KEY)) || '{}') || {}; } catch (e) { table = {}; }
-  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(table)); } catch (e) {} };
+  try { table = JSON.parse((typeof localStorage !== 'undefined' && localStorage.getItem(KEY())) || '{}') || {}; } catch (e) { table = {}; }
+  const save = () => {
+    try {
+      // keep it bounded: a long session must not grow this forever
+      const keys = Object.keys(table);
+      if (keys.length > 600) for (const k of keys.slice(0, keys.length - 600)) delete table[k];
+      localStorage.setItem(KEY(), JSON.stringify(table));
+    } catch (e) {}
+  };
 
   function cellAt(d, cx, cy) {
     let h = '', dark = 0;
@@ -1224,7 +1243,7 @@ const V = (() => {
 
   const state = (h) => {
     const t = table[h]; if (!t) return '?';
-    if (t.x && t.x >= t.w && t.x >= t.b) return 'D';
+    if (t.x >= 2 && t.x >= t.w && t.x >= t.b) return 'D';   // two sightings, not one
     if (t.b > t.w) return '#';
     if (t.w > t.b) return '.';
     return '?';
@@ -1234,18 +1253,22 @@ const V = (() => {
     let bright = 0, n = 0;
     for (let y = 6; y < 100; y += 3) for (let x = 150; x < 234; x += 3) {
       const p = (y * W + x) * 4; n++;
-      if (d[p] > 225 && d[p + 1] > 225 && d[p + 2] > 215) bright++;
+      if (d[p] + d[p + 1] + d[p + 2] > 540) bright++;   // white OR the grey a list row uses
     }
     if (bright / n < 0.5) return null;
-    let best = -1, bestN = 0;                   // cursor: dark blob in the left margin of the panel
+    // The selected row is drawn as a brighter band across the list, not as a
+    // dark blob in the margin: measure each row's mean brightness instead.
+    let best = -1, bestV = 0, second = 0;
     for (let row = 0; row < 8; row++) {
-      let c = 0;
-      for (let y = 10 + row * 16; y < 10 + row * 16 + 16; y++) for (let x = 154; x < 168; x++) {
-        const p = (y * W + x) * 4; if (d[p] + d[p + 1] + d[p + 2] < 150) c++;
+      let sum = 0, n = 0;
+      for (let y = 48 + row * 16; y < 48 + row * 16 + 15; y++) for (let x = 160; x < 224; x += 2) {
+        const p = (y * W + x) * 4; sum += d[p] + d[p + 1] + d[p + 2]; n++;
       }
-      if (c > bestN) { bestN = c; best = row; }
+      const v = n ? sum / n : 0;
+      if (v > bestV) { second = bestV; bestV = v; best = row; } else if (v > second) second = v;
     }
-    return { cursor: bestN >= 6 ? best : -1 };
+    // only claim a cursor when one row is clearly brighter than the rest
+    return { cursor: (bestV - second > 25) ? best : -1 };
   }
 
   function look(d) {
@@ -1286,7 +1309,15 @@ const V = (() => {
       return tot ? ok / tot : 0;
     };
     let bj = 0, bs = -1;
-    for (let j = 0; j <= k; j++) { const s = score(j); if (s > bs + 0.02) { bs = s; bj = j; } }
+    // Search beyond the press count: a ledge jump or a scripted walk moves two
+    // tiles on one press, and bounding this by k meant j=2 was never tried, so
+    // the jump fell through to the warp branch and every ledge became a door.
+    // Ties go to the LARGER displacement, because identical frames score the
+    // same at j=0 and j=1 on plain floor, and picking j=0 called a walk blocked.
+    for (let j = 0; j <= Math.min(k + 2, 3); j++) {
+      const s2 = score(j);
+      if (s2 > bs + 0.02) { bs = s2; bj = j; }
+    }
     const mark = (i, f) => {
       const c = at(prev, PC.x + v[0] * i, PC.y + v[1] * i); if (c === null) return;
       const t = table[c] || (table[c] = { w: 0, b: 0, x: 0 }); t[f]++;
@@ -1300,7 +1331,8 @@ const V = (() => {
   }
 
   return {
-    look, learn,
+    look, learn, setScope,
+    scope: () => scope,
     known: () => Object.keys(table).length,
     export: () => JSON.stringify(table),
     merge: (t) => { for (const h in t) { const a = table[h] || (table[h] = { w: 0, b: 0, x: 0 }); a.w += t[h].w | 0; a.b += t[h].b | 0; a.x += t[h].x | 0; } save(); },
@@ -1490,6 +1522,7 @@ async function thinkApi(heard) {
     lastApi = 'NO CHANGE (' + unstickTries + ')';
     if (unstickTries >= 3) { unstickTries = 0; lastFrameKey = ''; return; }  // 3 free tries, then ask again
     pendingMove = null;                 // the shortcut presses buttons: never pair it
+    visPrev = null;                     // and never pair its frames with the last decision
     if (lastScreenKind === 'menu') menuTurns++;   // a still menu must still be counted
     const turn = ['UP', 'RIGHT', 'DOWN', 'LEFT'][unstickTries % 4];
     await runButtons([turn, turn]);
@@ -1528,6 +1561,7 @@ async function thinkApi(heard) {
   if (decodedAll) prompt += '\n\nWhat the screen decodes to:\n' + decodedAll;
   const vis = visionLook();
   if (vis) {
+    try { V.setScope(romName, ''); } catch (e) {}
     if (visPrev && lastScreenKind === 'map') V.learn(visPrev.cells, visPrev.dir, visPrev.k, vis.cells);
     visPrev = null;
     prompt += '\n\n' + vis.text;
@@ -1744,6 +1778,7 @@ function rest() {
 }
 $('forget').addEventListener('click', () => {
   seenGrids.clear(); prevGrid = null; stuckCount = 0; bestStuck = 0; tickCount = 0;
+  try { V.reset(); } catch (e) {}
   menuTurns = 0; lastScreenKind = ''; pendingMove = null;
   history = []; memo = []; lastMoves = ''; lastFrameKey = ''; unstickTries = 0; lastScene = ''; sceneSeenAtLastPicture = '';
   persistChat();
