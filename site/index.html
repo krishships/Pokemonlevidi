@@ -951,7 +951,8 @@ const COLOURS = [
   [200, 170, 110, 'sand'], [140, 100, 60, 'brown'],
   [70, 110, 190, 'blue'], [200, 60, 60, 'red'], [220, 200, 80, 'yellow'],
   [152, 208, 248, 'sky'], [104, 144, 240, 'sky'], [96, 168, 96, 'tall grass'],
-  [205, 205, 205, 'grey'], [235, 235, 235, 'white']
+  [205, 205, 205, 'grey'], [235, 235, 235, 'white'],
+  [189, 186, 197, 'panel'], [168, 176, 200, 'panel'], [216, 216, 224, 'panel']
 ];
 function colourName(r, g, b) {
   let best = 'mixed', bd = 1e9;
@@ -1130,7 +1131,7 @@ async function readScreenText() {
  *   - exits are named with their column, which borders never could */
 const LETTERS = { white: 'W', black: 'K', grey: 'S', 'dark grey': 'D', 'dark green': 'T',
                   'tall grass': 'V', 'light green': 'G', sand: 'P', brown: 'B',
-                  blue: 'U', sky: 'A', red: 'R', yellow: 'Y' };
+                  blue: 'U', sky: 'A', red: 'R', yellow: 'Y', panel: 'F' };
 
 function classify(r, g, b) {
   let best = 'grey', bd = 1e9, second = 1e9;
@@ -1245,7 +1246,7 @@ function screenToText() {
     // only name the letters this frame contains
     const NAMES = { W: 'white', K: 'black', S: 'grey', D: 'dark grey', T: 'tree',
                     V: 'tall grass', G: 'grass', P: 'path', B: 'brown', U: 'water',
-                    A: 'sky', R: 'red', Y: 'yellow', '?': 'mixed' };
+                    A: 'sky', R: 'red', Y: 'yellow', F: 'panel', '?': 'mixed' };
     const usedLetters = [...new Set(grid.flat().join(''))].sort()
       .map(c => c + ' ' + (NAMES[c] || 'other')).join(' ');
 
@@ -1269,10 +1270,12 @@ function screenToText() {
     else kind = 'this looks like a place you can walk.';
 
     lastScreenKind = boxOpen ? 'box' : (ink > 0.025 ? 'menu' : 'map');
+    const centreNote = centre === '?'
+      ? ' The centre is you: your own sprite covers it, so it reads as mixed.'
+      : ' Centre letter ' + centre + ' (that is where you are standing).';
     return [
       'Screen: ' + kind,
-      (boxOpen ? 'TEXT BOX OPEN.' : 'No text box.') +
-      ' Centre letter ' + centre + '.' +
+      (boxOpen ? 'TEXT BOX OPEN.' : 'No text box.') + centreNote +
       (exits.length ? ' Exits: ' + exits.join(' ') + '.' : ' No exits on any edge.') +
       ' You are the figure at the centre of the grid.',
       near,
