@@ -55,9 +55,10 @@
 
 extern const u8 EventScript_ResetAllMapFlags[];
 extern const u8 EventScript_ResetAllMapFlagsFrlg[];
+extern const u8 EventScript_SetupNewGameStart[];
 
 static void ClearFrontierRecord(void);
-static void WarpToTruck(void);
+static void WarpToNewGameStart(void);
 static void ResetMiniGamesRecords(void);
 static void ResetItemFlags(void);
 static void ResetDexNav(void);
@@ -133,12 +134,18 @@ static void ClearFrontierRecord(void)
     gSaveBlock2Ptr->frontier.opponentNames[1][0] = EOS;
 }
 
-static void WarpToTruck(void)
+// The player no longer starts inside the moving truck. They start on the tile
+// they used to step off the truck onto, in front of their own house in
+// LittlerootTown (the coords the truck's setdynamicwarp used to supply:
+// 12,10 in front of May's house, 3,10 in front of Brendan's).
+static void WarpToNewGameStart(void)
 {
     if (IS_FRLG)
         SetWarpDestination(MAP_GROUP(MAP_PALLET_TOWN_PLAYERS_HOUSE_2F), MAP_NUM(MAP_PALLET_TOWN_PLAYERS_HOUSE_2F), WARP_ID_NONE, 6, 6);
+    else if (gSaveBlock2Ptr->playerGender == FEMALE)
+        SetWarpDestination(MAP_GROUP(MAP_LITTLEROOT_TOWN), MAP_NUM(MAP_LITTLEROOT_TOWN), WARP_ID_NONE, 12, 10);
     else
-        SetWarpDestination(MAP_GROUP(MAP_INSIDE_OF_TRUCK), MAP_NUM(MAP_INSIDE_OF_TRUCK), WARP_ID_NONE, -1, -1);
+        SetWarpDestination(MAP_GROUP(MAP_LITTLEROOT_TOWN), MAP_NUM(MAP_LITTLEROOT_TOWN), WARP_ID_NONE, 3, 10);
     WarpIntoMap();
 }
 
@@ -211,11 +218,19 @@ void NewGameInitData(void)
     ResetFanClub();
     ResetLotteryCorner();
     UpdateDailySeed();
-    WarpToTruck();
+    WarpToNewGameStart();
     if (IS_FRLG)
+    {
         RunScriptImmediately(EventScript_ResetAllMapFlagsFrlg);
+    }
     else
+    {
         RunScriptImmediately(EventScript_ResetAllMapFlags);
+        // Puts the save in the state the vanilla intro would have left it in
+        // (intro state 7, heal point, house NPC/truck hide flags) without
+        // playing any of the intro cutscenes.
+        RunScriptImmediately(EventScript_SetupNewGameStart);
+    }
 #if IS_FRLG
         StringCopy(gSaveBlock1Ptr->rivalName, rivalName);
 #endif

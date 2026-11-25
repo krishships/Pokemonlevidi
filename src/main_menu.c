@@ -26,6 +26,7 @@
 #include "pokeball.h"
 #include "pokedex.h"
 #include "pokemon.h"
+#include "quickstart.h"
 #include "random.h"
 #include "rtc.h"
 #include "save.h"
@@ -1296,6 +1297,21 @@ static void HighlightSelectedMainMenuItem(enum PartyMenuType menuType, u8 select
 
 static void Task_NewGameBirchSpeech_Init(u8 taskId)
 {
+    // --- New-game intro cutscene removed ---------------------------------
+    // The Birch speech is skipped: Quickstart() fades to black and hands off
+    // to CB2_SkipToNewGame, which sets the player's gender/name and then calls
+    // CB2_NewGame. The original body below is deliberately left in place (and
+    // unreachable) so that the rest of the speech task chain stays referenced;
+    // this project builds with -Werror, so unused static functions are errors.
+    // To restore the speech, delete this block.
+    if (!gPaletteFade.active)
+    {
+        Quickstart();
+        DestroyTask(taskId);
+    }
+    return;
+    // ----------------------------------------------------------------------
+
     SetGpuReg(REG_OFFSET_DISPCNT, 0);
     SetGpuReg(REG_OFFSET_DISPCNT, DISPCNT_OBJ_ON | DISPCNT_OBJ_1D_MAP);
     InitBgFromTemplate(&sBirchBgTemplate);

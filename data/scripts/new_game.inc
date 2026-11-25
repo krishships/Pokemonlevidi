@@ -327,3 +327,52 @@ EventScript_ResetAllMapFlagsFrlg::
 	setflag FLAG_HIDE_SAFFRON_CITY_POKECENTER_SABRINA_JOURNALS
 	setvar VAR_MASSAGE_COOLDOWN_STEP_COUNTER, 500
 	end
+
+@ Puts a fresh save into the state the vanilla intro leaves behind, so the game
+@ can start in the overworld with no cutscene. Called from NewGameInitData
+@ (src/new_game.c) right after EventScript_ResetAllMapFlags.
+@
+@ This is InsideOfTruck_EventScript_SetIntroFlags* with VAR_LITTLEROOT_INTRO_STATE
+@ raised from 1/2 ("in truck") to 7 ("told to go meet rival"): 7 is the first
+@ state for which neither LittlerootTown nor the player's house queues an intro
+@ cutscene (see the state table at the top of data/maps/LittlerootTown/scripts.inc),
+@ and it leaves the normal starter flow (rival -> Route 101 -> Birch) intact.
+EventScript_SetupNewGameStart::
+	checkplayergender
+	goto_if_eq VAR_RESULT, MALE, EventScript_SetupNewGameStartMale
+	goto_if_eq VAR_RESULT, FEMALE, EventScript_SetupNewGameStartFemale
+	end
+
+EventScript_SetupNewGameStartMale::
+	setrespawn HEAL_LOCATION_LITTLEROOT_TOWN_BRENDANS_HOUSE_2F
+	setvar VAR_LITTLEROOT_INTRO_STATE, 7
+	setvar VAR_LITTLEROOT_HOUSES_STATE_BRENDAN, 1
+	setflag FLAG_HIDE_LITTLEROOT_TOWN_MAYS_HOUSE_MOM
+	setflag FLAG_HIDE_LITTLEROOT_TOWN_MAYS_HOUSE_TRUCK
+	setflag FLAG_HIDE_LITTLEROOT_TOWN_BRENDANS_HOUSE_TRUCK
+	setflag FLAG_HIDE_LITTLEROOT_TOWN_BRENDANS_HOUSE_RIVAL_MOM
+	setflag FLAG_HIDE_LITTLEROOT_TOWN_BRENDANS_HOUSE_RIVAL_SIBLING
+	setflag FLAG_HIDE_LITTLEROOT_TOWN_BRENDANS_HOUSE_2F_POKE_BALL
+	setflag FLAG_HIDE_LITTLEROOT_TOWN_MOM_OUTSIDE
+	setflag FLAG_HIDE_LITTLEROOT_TOWN_PLAYERS_HOUSE_VIGOROTH_1
+	setflag FLAG_HIDE_LITTLEROOT_TOWN_PLAYERS_HOUSE_VIGOROTH_2
+	setflag FLAG_SET_WALL_CLOCK
+	clearflag FLAG_HIDE_LITTLEROOT_TOWN_FAT_MAN
+	end
+
+EventScript_SetupNewGameStartFemale::
+	setrespawn HEAL_LOCATION_LITTLEROOT_TOWN_MAYS_HOUSE_2F
+	setvar VAR_LITTLEROOT_INTRO_STATE, 7
+	setvar VAR_LITTLEROOT_HOUSES_STATE_MAY, 1
+	setflag FLAG_HIDE_LITTLEROOT_TOWN_BRENDANS_HOUSE_MOM
+	setflag FLAG_HIDE_LITTLEROOT_TOWN_BRENDANS_HOUSE_TRUCK
+	setflag FLAG_HIDE_LITTLEROOT_TOWN_MAYS_HOUSE_TRUCK
+	setflag FLAG_HIDE_LITTLEROOT_TOWN_MAYS_HOUSE_RIVAL_MOM
+	setflag FLAG_HIDE_LITTLEROOT_TOWN_MAYS_HOUSE_RIVAL_SIBLING
+	setflag FLAG_HIDE_LITTLEROOT_TOWN_MAYS_HOUSE_2F_POKE_BALL
+	setflag FLAG_HIDE_LITTLEROOT_TOWN_MOM_OUTSIDE
+	setflag FLAG_HIDE_LITTLEROOT_TOWN_PLAYERS_HOUSE_VIGOROTH_1
+	setflag FLAG_HIDE_LITTLEROOT_TOWN_PLAYERS_HOUSE_VIGOROTH_2
+	setflag FLAG_SET_WALL_CLOCK
+	clearflag FLAG_HIDE_LITTLEROOT_TOWN_FAT_MAN
+	end
