@@ -474,7 +474,7 @@ function useApi() { return S.mode === 'api' && !!S.apikey; }
 
 function paintSettings() {
   $('apikey').value = S.apikey;
-  $('endpoint').value = PRESETS.groq.endpoint;
+  $('endpoint').value = proxyEndpoint || S.endpoint;
   $('model').value = S.model;
   $('ocr').value = S.ocr || 'off';
   $('gap').value = S.gap;
@@ -498,13 +498,14 @@ if (staleEndpoint) {
 
 function collect() {
   S.apikey = $('apikey').value.trim();
-  S.endpoint = $('endpoint').value.trim() || DEFAULTS.endpoint;
+  S.endpoint = proxyEndpoint || ($('endpoint').value.trim() || DEFAULTS.endpoint);
   S.model = normaliseModel($('model').value);
   S.gap = Math.max(1, Math.min(60, parseFloat($('gap').value) || 5));
   { const n = parseInt($('imgEvery').value, 10); S.imgEvery = Number.isFinite(n) ? Math.max(0, Math.min(50, n)) : 3; }
   S.eyesModel = $('eyesModel').value;
   S.ocr = $('ocr').value;
   S.persona = $('persona').value.trim() || DEFAULT_PERSONA;
+  S.goal = ($('goal') && $('goal').value.trim()) || DEFAULTS.goal;
 }
 function setMode(m) { S.mode = m; persist(); paintSettings(); }
 document.querySelectorAll('.opt').forEach(o => {
@@ -539,7 +540,7 @@ $('apikey').addEventListener('input', keyDetect);
 $('apikey').addEventListener('blur', keyDetect);
 
 $('presetGroq').addEventListener('click', () => {
-  $('endpoint').value = PRESETS.groq.endpoint;
+  $('endpoint').value = proxyEndpoint || S.endpoint;
   if (!$('model').value) $('model').value = PRESETS.groq.model;
   showKeyUrl('groq');
 });
@@ -568,6 +569,7 @@ let awake = false, loopRunning = false, nudgeFn = null, extraWait = 0, apiFails 
 let inputsSent = 0, framesSeen = 0, lastHash = null, stuck = 0, lastFrame = null;
 let lastJpeg = null, memo = [], lastMoves = '';
 let noVision = false, lastApi = 'NOT TESTED', slow = 0;
+let imgBackoff = 1;                // multiplies the picture interval after a 429
 let lastScreenKind = '';           // 'map' | 'menu' | 'box', from the decoder
 let menuTurns = 0;                 // turns in a row spent on a menu
 const seenGrids = new Map();       // grid signature -> { tried, worked, to, visits }
@@ -626,6 +628,8 @@ function paintStatus() {
     'SCREEN ' + (lastScreenKind || '—') + (menuTurns >= 2 ? ' (' + menuTurns + ' turns)' : ''),
     'STUCK ' + (stuckCount >= 3 ? '<span class="no">' + stuckCount + ' turns</span>' : stuckCount + ' turns'),
     'MAP MEMORY ' + seenGrids.size + ' views',
+    'PICTURE every ' + (S.imgEvery === 0 ? 'never (text only)' :
+      (imgBackoff > 1 ? (S.imgEvery * imgBackoff) + ' (backed off from ' + S.imgEvery + ')' : S.imgEvery)),
     'API ' + lastApi
   ].join('<br>');
 }
@@ -867,7 +871,7 @@ async function callModel(userText, frame, withHistory, ov) {
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + KEY },
       signal: ctrl.signal,
       body: JSON.stringify(Object.assign(
-        { model: MODEL, max_tokens: 500, temperature: 0.6, messages: msgs },
+        { model: MODEL, max_tokens: 200, temperature: 0.6, messages: msgs },
         (ov && ov.plain) ? {} : providerExtras(EP, MODEL)
       ))
     });
@@ -882,7 +886,8 @@ async function callModel(userText, frame, withHistory, ov) {
           'The endpoint must be https://api.groq.com/openai/v1/chat/completions');
       }
       if (res.status === 401) { const e = new Error('key rejected (401) — paste it again under KEY, then SAVE'); e.fatal = true; throw e; }
-      if (res.status === 400 && useImage && /image|vision|multimodal|content/i.test(body) && !callModel.retried) {
+      if (res.status === 400 && useImage && !(ov && ov.alwaysImage) &&
+          /image|vision|multimodal/i.test(body) && !callModel.retried) {
         noVision = true; callModel.retried = true;
         log('sys', 'this model rejected the image. Red will play blind until you pick a vision model.');
         try { return await callModel(userText, null, withHistory, ov); } finally { callModel.retried = false; }
@@ -945,7 +950,8 @@ const COLOURS = [
   [60, 110, 60, 'dark green'], [120, 190, 120, 'light green'],
   [200, 170, 110, 'sand'], [140, 100, 60, 'brown'],
   [70, 110, 190, 'blue'], [200, 60, 60, 'red'], [220, 200, 80, 'yellow'],
-  [152, 208, 248, 'sky'], [104, 144, 240, 'sky'], [96, 168, 96, 'tall grass']
+  [152, 208, 248, 'sky'], [104, 144, 240, 'sky'], [96, 168, 96, 'tall grass'],
+  [205, 205, 205, 'grey'], [235, 235, 235, 'white']
 ];
 function colourName(r, g, b) {
   let best = 'mixed', bd = 1e9;
@@ -1168,6 +1174,7 @@ function screenToText() {
     const px = (i, j) => { const p = (j * W + i) * 4; return [d[p], d[p + 1], d[p + 2]]; };
 
     const rows = [], grid = [];
+    let inkPixels = 0, allPixels = 0;      // detail INSIDE a tile: glyphs, edges, sprites
     for (let gy = 0; gy < GH; gy++) {
       let row = '';
       for (let gx = 0; gx < GW; gx++) {
@@ -1175,6 +1182,12 @@ function screenToText() {
         for (let j = gy * 8; j < gy * 8 + 8; j++)
           for (let i = gx * 8; i < gx * 8 + 8; i++) { const q = px(i, j); r += q[0]; g += q[1]; b += q[2]; n++; }
         r /= n; g /= n; b /= n;
+        for (let j = gy * 8; j < gy * 8 + 8; j++)
+          for (let i = gx * 8; i < gx * 8 + 8; i++) {
+            const q = px(i, j);
+            if (Math.max(Math.abs(q[0] - r), Math.abs(q[1] - g), Math.abs(q[2] - b)) > 60) inkPixels++;
+            allPixels++;
+          }
         const letter = LETTERS[classify(r, g, b)] || '?';
         row += letter;
       }
@@ -1244,21 +1257,18 @@ function screenToText() {
       i = j;
     }
 
-    // A menu is many small changes per row (text on a panel); open ground is a
-    // few big blocks. Measured on real frames: a menu scored 9.2 changes per
-    // row, Littleroot and Route 101 scored 0, 5.5 and 6.0. Without this, a menu
-    // reads as "sky and path", which is nonsense to act on.
-    const changes = rows.reduce((sum, r) => {
-      let n = 0;
-      for (let i = 1; i < r.length; i++) if (r[i] !== r[i - 1]) n++;
-      return sum + n;
-    }, 0) / GH;
+    // Detail inside a tile separates menus from maps far better than changes
+    // between tiles. Measured over 27 painted frames: maps 0.000-0.014 (even
+    // flower beds, tall grass, town roofs, caves), menus 0.043-0.215 (text and
+    // icons). A 3x margin, versus 0.05 for the changes-per-row test, which
+    // missed 6 of 7 menus and fired on a decorated map.
+    const ink = inkPixels / Math.max(1, allPixels);
     let kind;
     if (boxOpen) kind = 'a text box is open.';
-    else if (changes > 7) kind = 'this looks like a menu or a status screen, not open ground — small text on flat panels. There is probably nowhere to walk: press A to choose, B to back out.';
+    else if (ink > 0.025) kind = 'this looks like a menu or a status screen, not open ground — text and icons on flat panels. There is probably nowhere to walk: press A to choose, B to back out.';
     else kind = 'this looks like a place you can walk.';
 
-    lastScreenKind = boxOpen ? 'box' : (changes > 7 ? 'menu' : 'map');
+    lastScreenKind = boxOpen ? 'box' : (ink > 0.025 ? 'menu' : 'map');
     return [
       'Screen: ' + kind,
       (boxOpen ? 'TEXT BOX OPEN.' : 'No text box.') +
@@ -1314,6 +1324,7 @@ async function thinkApi(heard) {
     lastApi = 'NO CHANGE (' + unstickTries + ')';
     if (unstickTries >= 3) { unstickTries = 0; lastFrameKey = ''; return; }  // 3 free tries, then ask again
     pendingMove = null;                 // the shortcut presses buttons: never pair it
+    if (lastScreenKind === 'menu') menuTurns++;   // a still menu must still be counted
     const turn = ['UP', 'RIGHT', 'DOWN', 'LEFT'][unstickTries % 4];
     await runButtons([turn, turn]);
     return;
@@ -1321,28 +1332,33 @@ async function thinkApi(heard) {
   unstickTries = 0;
   const t0 = performance.now();
   let seen = '';
-  if (S.eyesModel && frame) {
+  const every = S.imgEvery * imgBackoff;                 // grows after a 429
+  const wasStuck = stuck >= 2;                           // must exist before the eyes test
+  if (S.eyesModel && frame && (heard.length > 0 || wasStuck || tickCount % Math.max(1, every) === 0)) {
     try { seen = await callEyes(lastJpeg || frame); } catch (e) { logOnce('eyes: ' + e.message); }
   }
   // the picture costs vision tokens, and vision tokens are what trip 429.
   // Send it when you speak, when he is stuck, or every Nth call. Otherwise a
   // free local description goes instead.
   tickCount++;
-  const wasStuck = stuck >= 2;
   const sceneNow = lastScene;
   const sceneChanged = sceneNow && sceneNow !== sceneSeenAtLastPicture;
   const neverPicture = S.imgEvery === 0;                 // text-only: the decoder carries it
   const wantPicture = !neverPicture && (heard.length > 0 || wasStuck || sceneChanged ||
-                      (tickCount % S.imgEvery === 0));
+                      (tickCount % Math.max(1, every) === 0));
   const picture = (seen || !wantPicture) ? null : (lastJpeg || frame);
   if (picture) sceneSeenAtLastPicture = lastScene;
   const gridNow = gridSignature();
   let prompt = 'Your goal right now: ' + (S.goal || DEFAULTS.goal) + '\n\n' + heardText(heard, frame);
-  const decoded = wantPicture ? '' : screenToText();   // no point paying for both
-  if (decoded) prompt += '\n\nWhat the screen decodes to:\n' + decoded;
+  // Always decode: the screen kind (map / menu / text box) must never be stale,
+  // or he gets pushed out of a map or trapped in a menu. The text is only sent
+  // when no picture is going, so the bytes are still saved.
+  const decodedAll = screenToText();
+  if (decodedAll) prompt += '\n\nWhat the screen decodes to:\n' + decodedAll;
   if (menuTurns >= 2) {
-    prompt += '\n\nYou have been on a menu for ' + menuTurns + ' turns. Press B to back out ' +
-              'unless you are deliberately changing a setting.';
+    prompt += '\n\nThis screen has not changed for ' + menuTurns + ' turns and it has a lot of ' +
+              'small detail. If it is a menu, A chooses and B backs out — and if you did not mean ' +
+              'to open it, back out.';
   }
 
   // what the learned map already knows about standing exactly here
@@ -1392,22 +1408,18 @@ async function thinkApi(heard) {
       act.buttons[0] = plan.action;
     }
   }
-  // a menu is a place to leave, not to live in
-  if (lastScreenKind === 'menu') {
-    menuTurns++;
-    if (menuTurns >= 3) {
-      act.buttons = ['B', 'B'];
-      act.note = 'backing out of the menu';
-      logOnce('menu for ' + menuTurns + ' turns — pressing B to back out');
-    }
-  } else {
-    menuTurns = 0;
+  // A menu is a place to leave, but the decoder cannot tell a menu from a busy
+  // map with any reliability: on real frames both score ink 0.10-0.22 and use
+  // 6-10 letters. Overriding his buttons on that guess froze him on decorated
+  // maps, so the page now only tells him, and never takes the controller.
+  if (lastScreenKind === 'menu') menuTurns++; else menuTurns = 0;
+  if (act.buttons && act.buttons.length) {
+    pendingMove = { grid: gridNow, action: act.buttons[0], want: act.buttons.length, done: 0 };
   }
-  if (act.buttons && act.buttons.length) pendingMove = { grid: gridNow, action: act.buttons[0] };
   lastApi = 'OK ' + Math.round(performance.now() - t0) + ' MS';
   history.push({ role: 'user', content: heard.length ? 'Dev: ' + heard.join(' / ') : 'Dev is silent.' },
                { role: 'assistant', content: JSON.stringify(act) });
-  if (history.length > 16) history = history.slice(-16);
+  if (history.length > 8) history = history.slice(-8);   // 4 messages: enough continuity, fewer tokens
   persistChat();
   if (act.say) log('him', act.say);
   const n = act.note || act.say;
@@ -1440,12 +1452,21 @@ function logOnce(msg) {            // do not repeat the same error line every fe
 async function tick() {
   const heard = pending.splice(0);
   if (useApi()) {
-    try { await thinkApi(heard); apiFails = 0; slow = Math.max(0, slow - 0.5); return; }
+    try {
+      await thinkApi(heard); apiFails = 0; slow = Math.max(0, slow - 0.5);
+      if (imgBackoff > 1 && Math.random() < 0.25) imgBackoff--;   // creep back to the setting
+      return;
+    }
     catch (err) {
       lastApi = err.rate ? '429 WAIT' : 'ERROR';
       logOnce('api: ' + err.message);
       if (err.rate) {
         slow = Math.min(20, slow + 4);                 // after a 429, play slower for a while
+        if (S.imgEvery > 0 && imgBackoff < 8) {
+          imgBackoff++;
+          logOnce('rate limited — sending a picture every ' + (S.imgEvery * imgBackoff) +
+                  ' turns instead of ' + S.imgEvery + ' until it settles');
+        }
         extraWait = err.retryMs;
         pending.unshift(...heard);                     // he still hears what you said
         return;                                        // stand still, do not wander at random
@@ -1485,6 +1506,7 @@ async function loop() {
 
 function wake() {
   slow = 0;                             // a fresh start is not still being punished
+  menuTurns = 0; lastScreenKind = '';
   if (!emu) adopt();                    // the page may have been reloaded under us
   if (!emu) { log('sys', 'load a ROM first'); return false; }
   if (awake) return true;
@@ -1495,12 +1517,14 @@ function wake() {
   return true;
 }
 function rest() {
+  menuTurns = 0;
   awake = false; nudge(); releaseAll();
   log('sys', 'red rests');
   paintStatus();
 }
 $('forget').addEventListener('click', () => {
   seenGrids.clear(); prevGrid = null; stuckCount = 0; bestStuck = 0; tickCount = 0;
+  menuTurns = 0; lastScreenKind = ''; pendingMove = null;
   history = []; memo = []; lastMoves = ''; lastFrameKey = ''; unstickTries = 0; lastScene = ''; sceneSeenAtLastPicture = '';
   persistChat();
   log('sys', 'red forgets everything he learned. the world is new to him again.');
