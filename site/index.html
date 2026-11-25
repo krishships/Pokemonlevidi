@@ -210,10 +210,16 @@ body.fs{height:calc(100dvh - var(--kb, 0px));grid-template-columns:auto minmax(0
     <label for="model">MODEL</label>
     <input type="text" id="model" list="modelList" autocomplete="off" spellcheck="false">
     <datalist id="modelList">
-      <option value="qwen/qwen3.8-27b">sees the screen and plays</option>
-      <option value="openai/gpt-oss-20b">text only, faster</option>
+      <option value="qwen/qwen3.8-27b">Groq — sees the screen and plays</option>
+      <option value="openai/gpt-oss-20b">Groq — text only, faster</option>
+      <option value="gemini-flash-latest">Gemini — the current Flash alias</option>
+      <option value="gemini-3.6-flash">Gemini — previous Flash, often less busy</option>
+      <option value="gemini-3.8-flash">Gemini — newest Flash</option>
+      <option value="gemini-2.5-flash">Gemini — older, usually available</option>
     </datalist>
-    <div class="hint">Type any Groq model id, or use LIST MODELS and copy one in. Text-only models play blind.</div>
+    <div class="hint">Type any model id, or use LIST MODELS. Groq ids look like
+      <b>vendor/name</b>; Gemini ids start with <b>gemini-</b>. If Gemini answers 503 it is
+      busy — pick another gemini- model, the page also retries once by itself.</div>
 
     <div class="hint" style="margin-top:12px"><b>EYES (optional)</b> — a second Groq call that only reads
       the screen, so the model that plays works from text. Same key, same endpoint.</div>
@@ -1034,6 +1040,19 @@ async function callModel(userText, frame, withHistory, ov) {
         log('sys', 'this model rejected the image. Red will play blind until you pick a vision model.');
         try { return await callModel(userText, null, withHistory, ov); } finally { callModel.retried = false; }
       }
+      if (gem && (res.status === 503 || res.status === 500 || res.status === 502) && !callModel.capacityTried) {
+        // Google returns 503 "high demand" for a model that is simply busy.
+        // Wait, then try a sibling model before failing.
+        callModel.capacityTried = true;
+        const alt = (MODEL === 'gemini-flash-latest') ? 'gemini-3.6-flash'
+                  : (MODEL === 'gemini-3.6-flash') ? 'gemini-3.8-flash' : '';
+        logOnce('Gemini is busy on ' + MODEL + (alt ? ' — trying ' + alt : ' — waiting and retrying'));
+        try {
+          await sleep(1500);
+          const ov2 = Object.assign({}, ov, alt ? { model: alt } : {});
+          return await callModel(userText, frame, withHistory, ov2);
+        } finally { callModel.capacityTried = false; }
+      }
       if (res.status === 429) {
         slot.n = TPM_BUDGET;                 // the server says we are full: believe it
 
@@ -1044,6 +1063,10 @@ async function callModel(userText, frame, withHistory, ov) {
         const err = apiError('rate limited (429). waiting ' + Math.round((ms || 15000) / 1000) + ' s', Math.max(3000, Math.min(120000, ms || 15000)));
         err.rate = true;
         throw err;
+      }
+      if (gem && (res.status === 503 || res.status === 500)) {
+        throw apiError('Gemini is busy on ' + MODEL + ' right now (503). Try another model in MODEL — ' +
+          'gemini-3.6-flash, gemini-3.8-flash or gemini-2.5-flash — or wait a minute.');
       }
       throw apiError('HTTP ' + res.status + ' ' + body);
     }
