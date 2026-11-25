@@ -244,7 +244,12 @@ body.fs{height:calc(100dvh - var(--kb, 0px));grid-template-columns:auto minmax(0
     <input type="text" id="gap" inputmode="numeric" placeholder="5">
     <div class="hint">Free API plans have rate limits. Raise this if you see errors 429.</div>
 
-    <label>RED'S PERSONA</label>
+    <label for="goal">WHAT RED IS TRYING TO DO</label>
+    <textarea id="goal" rows="2"></textarea>
+    <div class="hint">Reminded to him every turn. Keep it short and concrete —
+      "get out of this house and find the road north" beats "explore".</div>
+
+    <label for="persona">RED'S PERSONA</label>
     <textarea id="persona"></textarea>
 
     <div class="row">
@@ -418,6 +423,7 @@ function normaliseModel(m) {
 
 const DEFAULTS = Object.assign({
   mode: 'local', apikey: '', ocr: 'off', gap: 5, persona: DEFAULT_PERSONA,
+  goal: 'Get out of this room, then find out where you are and what is going on.',
   eyesModel: '',                                     // optional second Groq call that only reads the screen
   imgEvery: 3                                        // send the picture on 1 call in N, text otherwise
 }, PRESETS.groq);
@@ -475,6 +481,7 @@ function paintSettings() {
   $('imgEvery').value = S.imgEvery;
   $('eyesModel').value = S.eyesModel || '';
   $('persona').value = S.persona;
+  if ($('goal')) $('goal').value = S.goal;
   document.querySelectorAll('.opt').forEach(o => o.classList.toggle('on', o.dataset.mode === S.mode));
   $('apibtn').textContent = S.apikey ? 'KEY OK' : 'KEY';
   document.querySelectorAll('.switch .opt').forEach(el => {
@@ -561,6 +568,8 @@ let awake = false, loopRunning = false, nudgeFn = null, extraWait = 0, apiFails 
 let inputsSent = 0, framesSeen = 0, lastHash = null, stuck = 0, lastFrame = null;
 let lastJpeg = null, memo = [], lastMoves = '';
 let noVision = false, lastApi = 'NOT TESTED', slow = 0;
+let lastScreenKind = '';           // 'map' | 'menu' | 'box', from the decoder
+let menuTurns = 0;                 // turns in a row spent on a menu
 const seenGrids = new Map();       // grid signature -> { tried, worked, to, visits }
 let pendingMove = null;          // { grid, action } from the last decision
 let stuckCount = 0;              // turns in a row where the screen did not change
@@ -614,6 +623,7 @@ function paintStatus() {
     'BRAIN ' + (useApi() ? 'API' : 'LOCAL'),
     'MEMORY ' + f(mem.ok, mem.ok ? mem.size + ' B' : 'NOT EXPOSED'),
     'MOVES ' + inputsSent + ' / FRAMES ' + framesSeen,
+    'SCREEN ' + (lastScreenKind || '—') + (menuTurns >= 2 ? ' (' + menuTurns + ' turns)' : ''),
     'STUCK ' + (stuckCount >= 3 ? '<span class="no">' + stuckCount + ' turns</span>' : stuckCount + ' turns'),
     'MAP MEMORY ' + seenGrids.size + ' views',
     'API ' + lastApi
@@ -1248,6 +1258,7 @@ function screenToText() {
     else if (changes > 7) kind = 'this looks like a menu or a status screen, not open ground — small text on flat panels. There is probably nowhere to walk: press A to choose, B to back out.';
     else kind = 'this looks like a place you can walk.';
 
+    lastScreenKind = boxOpen ? 'box' : (changes > 7 ? 'menu' : 'map');
     return [
       'Screen: ' + kind,
       (boxOpen ? 'TEXT BOX OPEN.' : 'No text box.') +
@@ -1326,9 +1337,13 @@ async function thinkApi(heard) {
   const picture = (seen || !wantPicture) ? null : (lastJpeg || frame);
   if (picture) sceneSeenAtLastPicture = lastScene;
   const gridNow = gridSignature();
-  let prompt = heardText(heard, frame);
+  let prompt = 'Your goal right now: ' + (S.goal || DEFAULTS.goal) + '\n\n' + heardText(heard, frame);
   const decoded = wantPicture ? '' : screenToText();   // no point paying for both
   if (decoded) prompt += '\n\nWhat the screen decodes to:\n' + decoded;
+  if (menuTurns >= 2) {
+    prompt += '\n\nYou have been on a menu for ' + menuTurns + ' turns. Press B to back out ' +
+              'unless you are deliberately changing a setting.';
+  }
 
   // what the learned map already knows about standing exactly here
   const rec = gridNow && seenGrids.get(gridNow);
@@ -1376,6 +1391,17 @@ async function thinkApi(heard) {
       if (stuckCount >= 2) logOnce('stuck here — the map says try ' + plan.action + ' instead');
       act.buttons[0] = plan.action;
     }
+  }
+  // a menu is a place to leave, not to live in
+  if (lastScreenKind === 'menu') {
+    menuTurns++;
+    if (menuTurns >= 3) {
+      act.buttons = ['B', 'B'];
+      act.note = 'backing out of the menu';
+      logOnce('menu for ' + menuTurns + ' turns — pressing B to back out');
+    }
+  } else {
+    menuTurns = 0;
   }
   if (act.buttons && act.buttons.length) pendingMove = { grid: gridNow, action: act.buttons[0] };
   lastApi = 'OK ' + Math.round(performance.now() - t0) + ' MS';
