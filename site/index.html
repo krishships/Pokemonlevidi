@@ -423,7 +423,7 @@ function normaliseModel(m) {
 }
 
 const DEFAULTS = Object.assign({
-  mode: 'local', apikey: '', ocr: 'off', gap: 5, persona: DEFAULT_PERSONA,
+  mode: 'local', apikey: '', ocr: 'on', gap: 2, persona: DEFAULT_PERSONA,
   goal: 'Get out of this room, then find out where you are and what is going on.',
   eyesModel: '',                                     // optional second Groq call that only reads the screen
   imgEvery: 3                                        // send the picture on 1 call in N, text otherwise
@@ -767,8 +767,10 @@ async function press(name) {
   if (!emu || !emu.gameManager || id === undefined) return;
   const gm = emu.gameManager;
   const dir = name === 'UP' || name === 'DOWN' || name === 'LEFT' || name === 'RIGHT';
-  const holdMs = dir ? (isGba ? 280 : 220) : 90;      // long enough to actually step, not just turn
-  const gapMs = dir ? 90 : 220;
+  // 140 ms is enough for the game to register a step; 280 was two frames of
+  // dead time per press, which is most of a turn's wall clock
+  const holdMs = dir ? (isGba ? 140 : 120) : 80;
+  const gapMs = dir ? 50 : 160;
   gm.simulateInput(0, id, 1); pressed.add(id); inputsSent++;
   await sleep(holdMs);
   gm.simulateInput(0, id, 0); pressed.delete(id);
@@ -1077,7 +1079,16 @@ function loadOcr() {
   ocrLoading = new Promise((res, rej) => {
     const sc = document.createElement('script');
     sc.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
-    sc.onload = async () => { try { ocrWorker = await Tesseract.createWorker('eng'); res(ocrWorker); } catch (e) { rej(e); } };
+    sc.onload = async () => {
+      try {
+        // lstm-only: ~7 MB of language data instead of 15.8 MB, plenty for a
+        // 240x160 bitmap font, and it is cached by the CDN after the first load
+        ocrWorker = await Tesseract.createWorker('eng', 1, {
+          langPath: 'https://cdn.jsdelivr.net/npm/@tesseract.js-data/eng@1.0.0/4.0.0',
+        });
+        res(ocrWorker);
+      } catch (e) { rej(e); }
+    };
     sc.onerror = () => rej(new Error('could not load tesseract.js'));
     document.head.appendChild(sc);
   });
@@ -1218,18 +1229,25 @@ function screenToText() {
     const l = spans(rows.map(r => r[0]));  if (l) exits.push('left@' + l);
     const rt = spans(rows.map(r => r[GW - 1])); if (rt) exits.push('right@' + rt);
 
-    // text box: a dark rule across the bottom, with light fill beneath it
-    let darkRow = false;
-    for (let j = Math.floor(H * 0.62); j < H - 10 && !darkRow; j++) {
-      let dark = 0;
-      for (let i = 4; i < W - 4; i++) { const q = px(i, j); if (q[0] < 60 && q[1] < 60 && q[2] < 60) dark++; }
-      if (dark > (W - 8) * 0.6) darkRow = true;
+    // A text box is a bordered panel of light fill. The border is black in some
+    // screens and teal in Emerald's dialogue, so look for a row that is mostly
+    // ONE non-white colour rather than specifically black.
+    let borderRow = false;
+    for (let j = Math.floor(H * 0.55); j < H - 6 && !borderRow; j++) {
+      const counts = new Map();
+      for (let i = 4; i < W - 4; i++) {
+        const q = px(i, j);
+        if (q[0] > 235 && q[1] > 235 && q[2] > 235) continue;      // white fill is not a border
+        const k = (q[0] >> 3) + ',' + (q[1] >> 3) + ',' + (q[2] >> 3);
+        counts.set(k, (counts.get(k) || 0) + 1);
+      }
+      for (const n of counts.values()) if (n > (W - 8) * 0.55) { borderRow = true; break; }
     }
     let bw = 0, bn = 0;
     for (let j = Math.floor(H * 0.74); j < H; j++) for (let i = 4; i < W - 4; i++) {
       const q = px(i, j); bn++; if (q[0] > 235 && q[1] > 235 && q[2] > 235) bw++;
     }
-    const boxOpen = darkRow && (bw / Math.max(1, bn) > 0.4);
+    const boxOpen = borderRow && (bw / Math.max(1, bn) > 0.3);
 
     // centre from a block, not one pixel
     const centre = grid[GH >> 1][GW >> 1];      // the same cell the grid shows
@@ -1382,6 +1400,10 @@ async function thinkApi(heard) {
     // the 30x20 decoder above already describes this screen; a second, coarser
     // description of the same frame was 68% of the prompt for no new information
     const ocrText = await readScreenText();
+    if (ocrText) logOnce('reading the text box: "' + ocrText.slice(0, 60) + '"');
+    else if (S.ocr !== 'on' && lastScreenKind === 'box') {
+      logOnce('a text box is open and OCR is off, so he cannot read it — turn READ SCREEN TEXT on under KEY');
+    }
     if (ocrText) prompt += '\n\nText read from the screen: "' + ocrText + '"';
   }
   // memory between pictures: his own notes, last moves, and whether they did anything
@@ -1466,7 +1488,7 @@ async function tick() {
       logOnce('api: ' + err.message);
       if (err.rate) {
         slow = Math.min(20, slow + 4);                 // after a 429, play slower for a while
-        if (S.imgEvery > 0 && imgBackoff < 8) {
+        if (S.imgEvery > 0 && imgBackoff < 4) {
           imgBackoff++;
           logOnce('rate limited — sending a picture every ' + (S.imgEvery * imgBackoff) +
                   ' turns instead of ' + S.imgEvery + ' until it settles');
