@@ -1209,11 +1209,24 @@ const V = (() => {
   // Keyed by the ROM and the map: a table learned in FireRed's rooms must never
   // be applied to Emerald's floors, and one map's tiles must not decide another's.
   let scope = 'default';
+  let shipped = {};                  // the table that came with the page, always applied
+  const applyShipped = () => {
+    for (const h in shipped) {
+      const sEntry = shipped[h];
+      if (!sEntry || typeof sEntry.w !== 'number') continue;      // junk must not abort the merge
+      const t = table[h];
+      if (!t) { table[h] = { w: sEntry.w | 0, b: sEntry.b | 0, x: 0 }; continue; }
+      // learned evidence wins once it is strong, so a wrong shipped entry can be
+      // corrected; until then the shipped entry keeps the tile readable
+      if ((t.w | 0) + (t.b | 0) < 3) { t.w = sEntry.w | 0; t.b = sEntry.b | 0; }
+    }
+  };
   const setScope = (romName, mapId) => {
     const next = (romName || 'rom') + ':' + (mapId || 'map');
     if (next === scope) return;
     scope = next;
     try { table = JSON.parse(localStorage.getItem(KEY()) || '{}') || {}; } catch (e) { table = {}; }
+    applyShipped();                  // never lose the shipped table on a scope switch
   };
   const KEY = () => 'redexe.tiles.v2:' + scope;
   let table = {};
@@ -1335,7 +1348,16 @@ const V = (() => {
     scope: () => scope,
     known: () => Object.keys(table).length,
     export: () => JSON.stringify(table),
-    merge: (t) => { for (const h in t) { const a = table[h] || (table[h] = { w: 0, b: 0, x: 0 }); a.w += t[h].w | 0; a.b += t[h].b | 0; a.x += t[h].x | 0; } save(); },
+    merge: (t) => {
+      if (!t || typeof t !== 'object') return;
+      for (const h in t) {
+        const e = t[h];
+        if (!e || typeof e.w !== 'number' || typeof e.b !== 'number') continue;   // atomic: one bad entry skipped, not fatal
+        shipped[h] = { w: e.w | 0, b: e.b | 0 };
+      }
+      applyShipped();
+      save();
+    },
     reset: () => { table = {}; save(); }
   };
 })();
@@ -1426,12 +1448,15 @@ function screenToText() {
     const boxOpen = borderRow && (bw / Math.max(1, bn) > 0.3);
 
     // centre from a block, not one pixel
-    const centre = grid[GH >> 1][GW >> 1];      // the same cell the grid shows
+    const centre = grid[9][15];                 // the feet tile, same cell the tile map uses
 
     // one step is a 16px metatile = 2x2 cells, so the real neighbours are 2
     // cells away; at 1 cell the "around you" squares were the player's own body
+    // The player's feet are at grid row 9 of the 30x20 grid (the 16px cell row 4,
+    // doubled): using row 10 put every probe one tile low, and "up" landed on the
+    // player's own body.
     const around = (dy, dx) => {
-      const gy = 10 + dy * 2, gx = 15 + dx * 2;
+      const gy = 9 + dy * 2, gx = 15 + dx * 2;
       if (gy < 0 || gy >= GH || gx < 0 || gx >= GW) return 'edge';
       return grid[gy][gx];
     };
@@ -1758,6 +1783,7 @@ async function loop() {
   loopRunning = false;
 }
 
+let tilesAwaited = false;
 function wake() {
   slow = 0;                             // a fresh start is not still being punished
   menuTurns = 0; lastScreenKind = '';
@@ -1765,6 +1791,7 @@ function wake() {
   if (!emu) { log('sys', 'load a ROM first'); return false; }
   if (awake) return true;
   awake = true; apiFails = 0;
+  if (!tilesAwaited) { tilesAwaited = true; tilesReady.catch(() => {}); }
   log('sys', 'red wakes up. brain: ' + (useApi() ? 'api (he chooses)' : 'local (keywords + wandering)'));
   paintStatus();
   loop();
@@ -1957,7 +1984,17 @@ $('tilesLoad').addEventListener('click', () => {
   const j = window.prompt('Paste a tile table:'); if (!j) return;
   try { V.merge(JSON.parse(j)); log('sys', 'tile table loaded: ' + V.known() + ' tiles'); } catch (e) { log('sys', 'that is not a tile table'); }
 });
-fetch('tiles.json').then(r => r.ok ? r.json() : null).then(t => { if (t) V.merge(t); }).catch(() => {});
+/* The shipped table must be there from turn zero, not learned on the way, so
+ * the loop waits on this promise before it starts. */
+const tilesReady = fetch('tiles.json')
+  .then(r => r.ok ? r.json() : null)
+  .then(t => {
+    if (!t) return 0;
+    V.merge(t);
+    log('sys', 'tile table loaded from the page: ' + V.known() + ' tiles known before the first move');
+    return V.known();
+  })
+  .catch(() => 0);
 $('listmodels').addEventListener('click', async () => {
   collect();
   if (!S.apikey) { log('sys', 'paste your key first'); return; }
