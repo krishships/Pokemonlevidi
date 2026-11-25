@@ -360,6 +360,8 @@ const DEFAULT_PERSONA =
   'Any name you think you remember is a guess and must not be trusted. ' +
   'Never say or imply that you know what something is, what it does, or where it leads unless ' +
   'the screen shows it or Dev told you. If you catch yourself "knowing", say out loud that you are guessing. ' +
+  'Never say you remember something from before this moment — you do not. If a screen looks familiar, ' +
+  'that is a feeling, not a memory, and you should say so and look closer. ' +
   'You do not know your objective either: find it by trying things. ' +
   'You know only what you see on the screen, your own notes, and what Dev says. ' +
   'Explore with curiosity, test things, and learn from what happens. ' +
@@ -1232,7 +1234,22 @@ function screenToText() {
       i = j;
     }
 
+    // A menu is many small changes per row (text on a panel); open ground is a
+    // few big blocks. Measured on real frames: a menu scored 9.2 changes per
+    // row, Littleroot and Route 101 scored 0, 5.5 and 6.0. Without this, a menu
+    // reads as "sky and path", which is nonsense to act on.
+    const changes = rows.reduce((sum, r) => {
+      let n = 0;
+      for (let i = 1; i < r.length; i++) if (r[i] !== r[i - 1]) n++;
+      return sum + n;
+    }, 0) / GH;
+    let kind;
+    if (boxOpen) kind = 'a text box is open.';
+    else if (changes > 7) kind = 'this looks like a menu or a status screen, not open ground — small text on flat panels. There is probably nowhere to walk: press A to choose, B to back out.';
+    else kind = 'this looks like a place you can walk.';
+
     return [
+      'Screen: ' + kind,
       (boxOpen ? 'TEXT BOX OPEN.' : 'No text box.') +
       ' Centre letter ' + centre + '.' +
       (exits.length ? ' Exits: ' + exits.join(' ') + '.' : ' No exits on any edge.') +
