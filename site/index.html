@@ -629,7 +629,9 @@ function paintStatus() {
     'EYES ' + f(vision && !noVision, vision ? (noVision ? 'MODEL HAS NO VISION' : 'ON') : 'OFF'),
     'RED ' + f(awake, awake ? 'AWAKE' : 'RESTING'),
     'BRAIN ' + (useApi() ? 'API' : 'LOCAL'),
-    'MEMORY ' + f(mem.ok, mem.ok ? mem.size + ' B' : 'NOT EXPOSED'),
+    'MEMORY ' + (mem.ok
+      ? '<span class="on">' + (mem.how || 'RAM') + ' · ' + Math.round(mem.size / 1024) + ' KB</span>'
+      : '<span class="no">NOT EXPOSED</span>'),
     'MOVES ' + inputsSent + ' / FRAMES ' + framesSeen,
     'SCREEN ' + (lastScreenKind || '—') + (menuTurns >= 2 ? ' (' + menuTurns + ' turns)' : ''),
     'STUCK ' + (stuckCount >= 3 ? '<span class="no">' + stuckCount + ' turns</span>' : stuckCount + ' turns'),
@@ -754,15 +756,87 @@ function adopt() {
   return false;
 }
 
+/* RAM access, three ways, in order of preference.
+ *
+ * 1. libretro's own accessor, if the core exports it.
+ * 2. The WebAssembly heap. EmulatorJS runs mgba as wasm, so the GBA's memory is
+ *    somewhere in Module.HEAPU8 even when no accessor is exported. If we can
+ *    find the save block by its shape, everything the Node harness does becomes
+ *    possible in the browser: real position, map id, collision, party.
+ * 3. Nothing: fall back to pixels, which is what the page does today.
+ */
+function findHeap() {
+  const cands = [];
+  const push = (o) => { if (o) cands.push(o); };
+  try { push(emu && emu.Module); } catch (e) {}
+  try { push(emu && emu.gameManager && emu.gameManager.Module); } catch (e) {}
+  try { push(window.Module); } catch (e) {}
+  try { push(emu && emu.Module && emu.Module.asm && emu.Module.asm.memory); } catch (e) {}
+  for (const c of cands) {
+    if (c.HEAPU8 && c.HEAPU8.length > 1e6) return c.HEAPU8;
+    if (c.wasmMemory && c.wasmMemory.buffer) return new Uint8Array(c.wasmMemory.buffer);
+    if (c.buffer && c.buffer.byteLength > 1e6) return new Uint8Array(c.buffer);
+  }
+  return null;
+}
+
+/* The save block starts {s16 x, s16 y, u8 mapGroup, u8 mapNum}. Scan for a
+ * pointer into the heap whose target looks like that, and keep the best few. */
+function findSaveBlock(heap) {
+  const dv = new DataView(heap.buffer, heap.byteOffset, heap.byteLength);
+  const len = heap.length;
+  const hits = [];
+  for (let i = 0; i + 8 < len; i += 4) {
+    const v = dv.getUint32(i, true);
+    if (v < 0x1000 || v + 8 >= len) continue;
+    const x = dv.getInt16(v, true), y = dv.getInt16(v + 2, true);
+    if (x < 0 || y < 0 || x > 400 || y > 400) continue;
+    const g = heap[v + 4], n = heap[v + 5];
+    if (g > 60 || n > 200) continue;
+    if (x === 0 && y === 0 && g === 0 && n === 0) continue;
+    hits.push({ at: i, ptr: v, x, y, g, n });
+    if (hits.length > 40) break;
+  }
+  return hits;
+}
+
 function probeMemory() {
   const mod = emu && (emu.Module || window.Module);
   const getData = mod && (mod._retro_get_memory_data || mod.retro_get_memory_data);
   const getSize = mod && (mod._retro_get_memory_size || mod.retro_get_memory_size);
-  if (typeof getData !== 'function') return;          // the usual case: Red sees pixels, not RAM
+  if (typeof getData === 'function') {
+    try {
+      const ptr = getData(2);
+      if (ptr) { mem = { ok: true, size: getSize ? getSize(2) : 0, how: 'libretro' }; return; }
+    } catch (e) {}
+  }
+  // the wasm heap: this is the one that could unlock everything
+  let heap = null;
+  try { heap = findHeap(); } catch (e) {}
+  if (!heap) { mem = { ok: false, size: 0, how: 'no heap' }; return; }
   try {
-    const ptr = getData(2);
-    if (ptr) { mem = { ok: true, size: getSize ? getSize(2) : 0 }; }
-  } catch (e) {}
+    const hits = findSaveBlock(heap);
+    if (hits.length) {
+      // prefer a candidate whose map id is small and whose position is not zero
+      hits.sort((a, b) => (a.g + a.n) - (b.g + b.n));
+      mem = { ok: true, size: heap.length, how: 'wasm heap', heap, ptr: hits[0].ptr,
+              x: hits[0].x, y: hits[0].y, g: hits[0].g, n: hits[0].n, cands: hits.length };
+      log('sys', 'RAM found in the wasm heap: position (' + hits[0].x + ',' + hits[0].y + ') map ' +
+          hits[0].g + ':' + hits[0].n + ' — ' + hits.length + ' candidate' + (hits.length === 1 ? '' : 's'));
+    } else {
+      mem = { ok: false, size: heap.length, how: 'heap, no save block' };
+    }
+  } catch (e) { mem = { ok: false, size: 0, how: 'scan failed: ' + e.message }; }
+}
+
+/* read the live position, if RAM is available */
+function ramPos() {
+  if (!mem || !mem.ok || !mem.ptr || !mem.heap) return null;
+  try {
+    const dv = new DataView(mem.heap.buffer, mem.heap.byteOffset, mem.heap.byteLength);
+    const p = mem.ptr;
+    return { x: dv.getInt16(p, true), y: dv.getInt16(p + 2, true), g: mem.heap[p + 4], n: mem.heap[p + 5] };
+  } catch (e) { return null; }
 }
 
 /* =============================================================== input */
@@ -1574,6 +1648,11 @@ async function thinkApi(heard) {
   if (picture) sceneSeenAtLastPicture = lastScene;
   const gridNow = gridSignature();
   let prompt = 'Your goal right now: ' + (S.goal || DEFAULTS.goal) + '\n\n' + heardText(heard, frame);
+  const rp = ramPos();
+  if (rp) {
+    prompt += '\n\nYou are at (' + rp.x + ',' + rp.y + ') on map ' + rp.g + ':' + rp.n +
+              '. That is read from the game itself, so it is exact.';
+  }
   if (boxLog.length) {
     prompt += '\n\nWhile you were pressing A yourself, the game said:\n' +
               boxLog.map(l => '  - "' + l + '"').join('\n') +
