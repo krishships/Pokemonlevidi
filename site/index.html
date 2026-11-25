@@ -224,6 +224,8 @@ body.fs{height:calc(100dvh - var(--kb, 0px));grid-template-columns:auto minmax(0
     <div class="hint">Same Groq key and endpoint. Nothing else to fill in.</div>
     <div class="row">
       <button class="sm" id="listmodels">LIST MODELS</button>
+      <button class="sm" id="tilesSave">SAVE TILES</button>
+      <button class="sm" id="tilesLoad">LOAD TILES</button>
     </div>
 
     <label for="ocr">READ SCREEN TEXT (OCR)</label>
@@ -242,8 +244,8 @@ body.fs{height:calc(100dvh - var(--kb, 0px));grid-template-columns:auto minmax(0
       roughly three times as many turns. Set <b>1</b> only if you want him to see sprites and colour.</div>
 
     <label>SECONDS BETWEEN RED'S MOVES</label>
-    <input type="text" id="gap" inputmode="numeric" placeholder="5">
-    <div class="hint">Free API plans have rate limits. Raise this if you see errors 429.</div>
+    <input type="text" id="gap" inputmode="numeric" placeholder="6">
+    <div class="hint">Free API plans have rate limits. The page also throttles itself to stay under the free token limit; raise this if you still see 429.</div>
 
     <label for="goal">WHAT RED IS TRYING TO DO</label>
     <textarea id="goal" rows="2"></textarea>
@@ -423,10 +425,10 @@ function normaliseModel(m) {
 }
 
 const DEFAULTS = Object.assign({
-  mode: 'local', apikey: '', ocr: 'on', gap: 1, persona: DEFAULT_PERSONA,
+  mode: 'local', apikey: '', ocr: 'on', gap: 6, persona: DEFAULT_PERSONA,
   goal: 'Get out of this room, then find out where you are and what is going on.',
   eyesModel: '',                                     // optional second Groq call that only reads the screen
-  imgEvery: 0                                        // 0 = text only. The decoder carries the screen;
+  imgEvery: 1                                        // network is not a constraint: he sees every turn
                                                      // a picture costs ~1500 of the 8000 free tokens/min
 }, PRESETS.groq);
 const STORE = 'redexe.v1';
@@ -445,7 +447,7 @@ try {
  * how a POST ended up at a static host and came back "405 Not Allowed". */
 S.endpoint = DEFAULTS.endpoint;
 { const g = Number(S.gap), n = Number(S.imgEvery);           // storage can hold anything
-  S.gap = Number.isFinite(g) ? Math.max(1, Math.min(30, g)) : 1;
+  S.gap = Number.isFinite(g) ? Math.max(1, Math.min(30, g)) : 6;
   S.imgEvery = Number.isFinite(n) ? Math.max(0, Math.min(50, n)) : 0; }
 {
   const fixed = normaliseModel(S.model);
@@ -502,7 +504,7 @@ function collect() {
   S.apikey = $('apikey').value.trim();
   S.endpoint = proxyEndpoint || ($('endpoint').value.trim() || DEFAULTS.endpoint);
   S.model = normaliseModel($('model').value);
-  S.gap = Math.max(1, Math.min(60, parseFloat($('gap').value) || 1));
+  S.gap = Math.max(1, Math.min(60, parseFloat($('gap').value) || 6));
   { const n = parseInt($('imgEvery').value, 10); S.imgEvery = Number.isFinite(n) ? Math.max(0, Math.min(50, n)) : 0; }
   S.eyesModel = $('eyesModel').value;
   S.ocr = $('ocr').value;
@@ -571,6 +573,8 @@ let awake = false, loopRunning = false, nudgeFn = null, extraWait = 0, apiFails 
 let inputsSent = 0, framesSeen = 0, lastHash = null, stuck = 0, lastFrame = null;
 let lastJpeg = null, memo = [], lastMoves = '';
 let noVision = false, lastApi = 'NOT TESTED', slow = 0;
+let lastGridSent = '';
+let visNow = null;
 let imgBackoff = 1;                // multiplies the picture interval after a 429
 let lastScreenKind = '';           // 'map' | 'menu' | 'box', from the decoder
 let menuTurns = 0;                 // turns in a row spent on a menu
@@ -770,8 +774,11 @@ async function press(name) {
   const dir = name === 'UP' || name === 'DOWN' || name === 'LEFT' || name === 'RIGHT';
   // 140 ms is enough for the game to register a step; 280 was two frames of
   // dead time per press, which is most of a turn's wall clock
-  const holdMs = dir ? (isGba ? 140 : 120) : 80;
-  const gapMs = dir ? 50 : 160;
+  // A walk step is 16 frames at 60fps = 266 ms. Under that the button is
+  // released mid-step: the player turns and never moves, which looks exactly
+  // like being blocked.
+  const holdMs = dir ? (isGba ? 300 : 220) : 90;
+  const gapMs = dir ? 40 : 140;
   gm.simulateInput(0, id, 1); pressed.add(id); inputsSent++;
   await sleep(holdMs);
   gm.simulateInput(0, id, 0); pressed.delete(id);
@@ -853,6 +860,22 @@ function providerExtras(ep, model) {
 }
 function apiError(msg, retryMs) { const e = new Error(msg); if (retryMs) e.retryMs = retryMs; return e; }
 
+/* client-side rate limiter: stay under Groq's free tokens/min and requests/min
+   instead of discovering the limit by hitting 429. Real usage replaces the estimate. */
+const TPM_BUDGET = 6000, RPM_BUDGET = 24;
+let tpmLog = [];
+async function tpmWait(est) {
+  for (;;) {
+    const now = Date.now();
+    tpmLog = tpmLog.filter(e => now - e.t < 60000);
+    const used = tpmLog.reduce((a, e) => a + e.n, 0);
+    if (!tpmLog.length || (used + est <= TPM_BUDGET && tpmLog.length < RPM_BUDGET)) break;
+    lastApi = 'THROTTLE';
+    await sleep(Math.min(5000, Math.max(500, 60000 - (now - tpmLog[0].t) + 100)));
+  }
+  const slot = { t: Date.now(), n: est }; tpmLog.push(slot); return slot;
+}
+
 async function callModel(userText, frame, withHistory, ov) {
   const EP = (ov && ov.endpoint) || S.endpoint;
   const MODEL = (ov && ov.model) || S.model;
@@ -864,9 +887,10 @@ async function callModel(userText, frame, withHistory, ov) {
        { type: 'image_url', image_url: Object.assign({ url: frame }, /openai\.com/.test(EP) ? { detail: 'low' } : {}) }]
     : (frame ? userText + '\n(You cannot see the screen this turn.)' : userText);
   const msgs = [{ role: 'system', content: (ov && ov.system) || (S.persona + FORMAT) }];
-  if (withHistory) for (const h of history.slice(-6)) msgs.push(h);
+  if (withHistory) for (const h of history.slice(-2)) msgs.push(h);
   msgs.push({ role: 'user', content });
 
+  const slot = await tpmWait(JSON.stringify(msgs).length / 3.5 + 170 + (useImage ? 1500 : 0));
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 20000);
   try {
@@ -875,7 +899,7 @@ async function callModel(userText, frame, withHistory, ov) {
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + KEY },
       signal: ctrl.signal,
       body: JSON.stringify(Object.assign(
-        { model: MODEL, max_tokens: 200, temperature: 0.6, messages: msgs },
+        { model: MODEL, max_tokens: 170, temperature: 0.6, messages: msgs },
         (ov && ov.plain) ? {} : providerExtras(EP, MODEL)
       ))
     });
@@ -897,6 +921,8 @@ async function callModel(userText, frame, withHistory, ov) {
         try { return await callModel(userText, null, withHistory, ov); } finally { callModel.retried = false; }
       }
       if (res.status === 429) {
+        slot.n = TPM_BUDGET;                 // the server says we are full: believe it
+
         const ra = parseFloat(res.headers.get('retry-after'));
         const hint = /try again in ([\d.]+)\s*(ms|s|m)/i.exec(body);   // Groq says "try again in 7.2s"
         let ms = ra > 0 ? ra * 1000 : 0;
@@ -908,6 +934,7 @@ async function callModel(userText, frame, withHistory, ov) {
       throw apiError('HTTP ' + res.status + ' ' + body);
     }
     const data = await res.json();
+    if (data.usage && data.usage.total_tokens) slot.n = data.usage.total_tokens;
     const msg = data.choices && data.choices[0] && data.choices[0].message;
     const text = (msg && msg.content) || '';
     if (!text.trim()) throw apiError('the model returned an empty reply (it may have spent its tokens thinking). Try the other model in MODEL.');
@@ -1167,6 +1194,130 @@ function rle(row) {
   return out;
 }
 
+/* ===== VISION: frame -> structured text, all local, zero tokens =====
+   15x10 grid of 16px tiles. Each tile gets a fingerprint. Walkability, doors
+   and blocked tiles are LEARNED from what happens when the player presses a
+   direction (screen shifts = walked, identical = blocked, new scene = warp).
+   The table persists and can be exported/imported (SAVE TILES / LOAD TILES). */
+const V = (() => {
+  const W = 240, H = 160, CW = 15, CH = 10;
+  const PC = { x: 7, y: 5 };                       // player's feet tile; change if the '@' is off
+  const DIR = { UP: [0, -1], DOWN: [0, 1], LEFT: [-1, 0], RIGHT: [1, 0] };
+  const KEY = 'redexe.tiles.v1';
+  let table = {};
+  try { table = JSON.parse((typeof localStorage !== 'undefined' && localStorage.getItem(KEY)) || '{}') || {}; } catch (e) { table = {}; }
+  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(table)); } catch (e) {} };
+
+  function cellAt(d, cx, cy) {
+    let h = '', dark = 0;
+    for (let by = 0; by < 4; by++) for (let bx = 0; bx < 4; bx++) {
+      let r = 0, g = 0, b = 0;
+      for (let j = 0; j < 4; j++) for (let i = 0; i < 4; i++) {
+        const p = ((cy * 16 + by * 4 + j) * W + cx * 16 + bx * 4 + i) * 4;
+        r += d[p]; g += d[p + 1]; b += d[p + 2];
+        if (d[p] + d[p + 1] + d[p + 2] < 120) dark++;
+      }
+      h += String.fromCharCode(48 + (((r >> 10) & 3) << 4 | ((g >> 10) & 3) << 2 | ((b >> 10) & 3)));
+    }
+    return { h, dark };
+  }
+
+  const state = (h) => {
+    const t = table[h]; if (!t) return '?';
+    if (t.x && t.x >= t.w && t.x >= t.b) return 'D';
+    if (t.b > t.w) return '#';
+    if (t.w > t.b) return '.';
+    return '?';
+  };
+
+  function menuInfo(d) {                       // right-hand white panel = start menu
+    let bright = 0, n = 0;
+    for (let y = 6; y < 100; y += 3) for (let x = 150; x < 234; x += 3) {
+      const p = (y * W + x) * 4; n++;
+      if (d[p] > 225 && d[p + 1] > 225 && d[p + 2] > 215) bright++;
+    }
+    if (bright / n < 0.5) return null;
+    let best = -1, bestN = 0;                   // cursor: dark blob in the left margin of the panel
+    for (let row = 0; row < 8; row++) {
+      let c = 0;
+      for (let y = 10 + row * 16; y < 10 + row * 16 + 16; y++) for (let x = 154; x < 168; x++) {
+        const p = (y * W + x) * 4; if (d[p] + d[p + 1] + d[p + 2] < 150) c++;
+      }
+      if (c > bestN) { bestN = c; best = row; }
+    }
+    return { cursor: bestN >= 6 ? best : -1 };
+  }
+
+  function look(d) {
+    const cells = [];
+    for (let cy = 0; cy < CH; cy++) for (let cx = 0; cx < CW; cx++) cells.push(cellAt(d, cx, cy));
+    const menu = menuInfo(d);
+    const count = {}; for (const c of cells) count[c.h] = (count[c.h] || 0) + 1;
+    const sym = (cx, cy) => {
+      const c = cells[cy * CW + cx];
+      if (cx === PC.x && cy === PC.y) return '@';
+      const s = state(c.h);
+      if (s === '?' && c.dark >= 10 && count[c.h] <= 1) return 'n';   // rare, outlined: person or object
+      return s;
+    };
+    const rows = [];
+    for (let cy = 0; cy < CH; cy++) { let r = ''; for (let cx = 0; cx < CW; cx++) r += sym(cx, cy); rows.push(r); }
+    const near = ['UP', 'DOWN', 'LEFT', 'RIGHT'].map(k => {
+      const s = sym(PC.x + DIR[k][0], PC.y + DIR[k][1]);
+      return k + '=' + ({ '#': 'blocked', '.': 'open', D: 'DOOR/WARP', n: 'person-or-object', '?': 'unknown' }[s] || '?');
+    }).join(' ');
+    let text = 'Tiles (15x10, @ you; # blocked . open D door/warp n person/object ? unknown):\n' + rows.join('\n') +
+               '\nNext to you: ' + near;
+    if (menu) text = 'MENU PANEL OPEN on the right' + (menu.cursor >= 0 ? '; cursor on item ' + menu.cursor + ' from the top (0 = first). ' : '. ') +
+                     'A chooses, B closes.\n' + text;
+    return { cells: cells.map(c => c.h), text, menu: !!menu };
+  }
+
+  /* learn from one decision: k presses of dir, then the new frame */
+  function learn(prev, dir, k, now) {
+    const v = DIR[dir]; if (!prev || !v || !now) return;
+    const at = (arr, x, y) => (x < 0 || y < 0 || x >= CW || y >= CH) ? null : arr[y * CW + x];
+    const score = (j) => {                     // fraction of tiles that moved j steps against the walk
+      let ok = 0, tot = 0;
+      for (let y = 0; y < CH; y++) for (let x = 0; x < CW; x++) {
+        const o = at(prev, x + v[0] * j, y + v[1] * j); if (o === null) continue;
+        tot++; if (now[y * CW + x] === o) ok++;
+      }
+      return tot ? ok / tot : 0;
+    };
+    let bj = 0, bs = -1;
+    for (let j = 0; j <= k; j++) { const s = score(j); if (s > bs + 0.02) { bs = s; bj = j; } }
+    const mark = (i, f) => {
+      const c = at(prev, PC.x + v[0] * i, PC.y + v[1] * i); if (c === null) return;
+      const t = table[c] || (table[c] = { w: 0, b: 0, x: 0 }); t[f]++;
+    };
+    if (bs >= 0.6) {                           // walked bj tiles, then (if bj<k) hit something
+      for (let i = 1; i <= bj; i++) mark(i, 'w');
+      if (bj < k) mark(bj + 1, 'b');
+    } else if (k === 1) mark(1, 'x');          // scene replaced: that tile was a warp
+    else return;
+    save();
+  }
+
+  return {
+    look, learn,
+    known: () => Object.keys(table).length,
+    export: () => JSON.stringify(table),
+    merge: (t) => { for (const h in t) { const a = table[h] || (table[h] = { w: 0, b: 0, x: 0 }); a.w += t[h].w | 0; a.b += t[h].b | 0; a.x += t[h].x | 0; } save(); },
+    reset: () => { table = {}; save(); }
+  };
+})();
+let visPrev = null;     // {cells, dir, k} of the last decision, learned from on the next tick
+function visionLook() {
+  const img = $('preview');
+  if (!img || !img.src || img.src.indexOf('data:image') !== 0) return null;
+  try {
+    const c = document.createElement('canvas'); c.width = 240; c.height = 160;
+    const x = c.getContext('2d'); x.imageSmoothingEnabled = false; x.drawImage(img, 0, 0, 240, 160);
+    return V.look(x.getImageData(0, 0, 240, 160).data);
+  } catch (e) { return null; }
+}
+
 function screenToText() {
   const img = $('preview');
   if (!img || !img.src || img.src.indexOf('data:image') !== 0) return '';
@@ -1291,12 +1442,12 @@ function screenToText() {
       (exits.length ? ' Exits: ' + exits.join(' ') + '.' : ' No exits on any edge.') +
       ' You are the figure at the centre of the grid.',
       near,
-      'Grid 30x20, one letter per 8x8 pixel cell, rows separated by /. A number after a ' +
+      V.known() >= 25 ? '(Learned tile map below replaces the letter grid.)' : 'Grid 30x20, one letter per 8x8 pixel cell, rows separated by /. A number after a ' +
       'letter is a repeat count (G30 = 30 grass cells); a letter with no number is one cell; ' +
       'xN after a row means that row repeats N times. One step = 2 cells. ' +
       'Letters here: ' + usedLetters, 
       enc.join('/')
-    ].join('\n');
+    ].slice(0, V.known() >= 25 ? 4 : 6).join('\n');
   } catch (e) { return ''; }
 }
 
@@ -1365,11 +1516,28 @@ async function thinkApi(heard) {
   if (picture) sceneSeenAtLastPicture = lastScene;
   const gridNow = gridSignature();
   let prompt = 'Your goal right now: ' + (S.goal || DEFAULTS.goal) + '\n\n' + heardText(heard, frame);
+  if (boxLog.length) {
+    prompt += '\n\nWhile you were pressing A yourself, the game said:\n' +
+              boxLog.map(l => '  - "' + l + '"').join('\n') +
+              '\nThat was the dialogue you skipped through. Use it.';
+  }
   // Always decode: the screen kind (map / menu / text box) must never be stale,
   // or he gets pushed out of a map or trapped in a menu. The text is only sent
   // when no picture is going, so the bytes are still saved.
   const decodedAll = screenToText();
   if (decodedAll) prompt += '\n\nWhat the screen decodes to:\n' + decodedAll;
+  const vis = visionLook();
+  if (vis) {
+    if (visPrev && lastScreenKind === 'map') V.learn(visPrev.cells, visPrev.dir, visPrev.k, vis.cells);
+    visPrev = null;
+    prompt += '\n\n' + vis.text;
+    visNow = vis;
+  }
+  if (gridNow && lastGridSent && gridNow.length === lastGridSent.length) {   // cheap frame-to-text: what moved
+    let dc = 0; for (let i = 0; i < gridNow.length; i++) if (gridNow[i] !== lastGridSent[i]) dc++;
+    prompt += '\nSince your last look ' + (dc === 0 ? 'nothing on screen changed.' : dc + ' of ' + gridNow.length + ' tiles changed' + (dc > gridNow.length * 0.6 ? ' (new scene).' : '.'));
+  }
+  lastGridSent = gridNow;
   if (menuTurns >= 2) {
     prompt += '\n\nThis screen has not changed for ' + menuTurns + ' turns and it has a lot of ' +
               'small detail. If it is a menu, A chooses and B backs out — and if you did not mean ' +
@@ -1436,12 +1604,15 @@ async function thinkApi(heard) {
   lastApi = 'OK ' + Math.round(performance.now() - t0) + ' MS';
   history.push({ role: 'user', content: heard.length ? 'Dev: ' + heard.join(' / ') : 'Dev is silent.' },
                { role: 'assistant', content: JSON.stringify(act) });
-  if (history.length > 8) history = history.slice(-8);   // 4 messages: enough continuity, fewer tokens
+  if (history.length > 4) history = history.slice(-4);   // 4 messages: enough continuity, fewer tokens
   persistChat();
   if (act.say) log('him', act.say);
   const n = act.note || act.say;
   if (n) { memo.push(n); if (memo.length > 4) memo.shift(); }
   lastMoves = (act.buttons || []).join(' ');
+  { const b = act.buttons || [];          // only learn from a run of one direction
+    visPrev = (visNow && b.length && b.length <= 6 && ['UP','DOWN','LEFT','RIGHT'].includes(b[0]) && b.every(x => x === b[0]) && lastScreenKind === 'map')
+      ? { cells: visNow.cells, dir: b[0], k: b.length } : null; }
   lastFrameKey = key;
   lastButtons = act.buttons || [];
   await runButtons(act.buttons);
@@ -1466,8 +1637,28 @@ function logOnce(msg) {            // do not repeat the same error line every fe
   if (msg === lastErr && now - lastErrAt < 60000) return;
   lastErr = msg; lastErrAt = now; log('sys', msg);
 }
+let lastBoxText = '', boxPresses = 0;
+const boxLog = [];                 // dialogue he advanced himself, for context
+
 async function tick() {
   const heard = pending.splice(0);
+
+  /* Reflex: a text box advances with A. Asking the model costs a round trip,
+   * and after a 429 that is a 15 second wait to press one button. Read the box
+   * locally and only call the model when the text is new. */
+  if (useApi() && !heard.length && lastScreenKind === 'box') {
+    const txt = await readScreenText();
+    if (!txt || txt === lastBoxText) {
+      boxPresses++;
+      lastApi = 'BOX (local A)';
+      await press('A');
+      if (boxPresses > 60) { boxPresses = 0; lastBoxText = ''; }
+      return;
+    }
+    lastBoxText = txt;
+    boxPresses = 0;
+    if (txt && boxLog[boxLog.length - 1] !== txt) { boxLog.push(txt); if (boxLog.length > 12) boxLog.shift(); }
+  } else if (lastScreenKind !== 'box') { lastBoxText = ''; boxPresses = 0; }
   if (useApi()) {
     try {
       await thinkApi(heard); apiFails = 0; slow = Math.max(0, slow - 0.5);
@@ -1520,7 +1711,7 @@ async function loop() {
     // next tick can start as soon as the presses have landed: the decoder reads
     // the frame at the top of the tick, so nothing is stale.
     const base = (S.gap + slow) * 1000;
-    const quick = (slow === 0 && apiFails === 0 && extraWait === 0) ? base * 0.4 : base;
+    const quick = base;   // no shortcut: it undercut the rate limit
     await sleepOrNudge(Math.max(quick, extraWait, 300));
   }
   loopRunning = false;
@@ -1716,6 +1907,15 @@ $('testai').addEventListener('click', async () => {
   paintStatus();
 });
 
+$('tilesSave').addEventListener('click', () => {
+  const j = V.export();
+  (navigator.clipboard ? navigator.clipboard.writeText(j) : Promise.reject()).then(() => log('sys', 'tile table copied (' + V.known() + ' tiles)'), () => window.prompt('Copy the tile table:', j));
+});
+$('tilesLoad').addEventListener('click', () => {
+  const j = window.prompt('Paste a tile table:'); if (!j) return;
+  try { V.merge(JSON.parse(j)); log('sys', 'tile table loaded: ' + V.known() + ' tiles'); } catch (e) { log('sys', 'that is not a tile table'); }
+});
+fetch('tiles.json').then(r => r.ok ? r.json() : null).then(t => { if (t) V.merge(t); }).catch(() => {});
 $('listmodels').addEventListener('click', async () => {
   collect();
   if (!S.apikey) { log('sys', 'paste your key first'); return; }
