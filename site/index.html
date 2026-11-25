@@ -392,8 +392,8 @@ const FORMAT =
 
 const PRESETS = {
   groq:   { endpoint: 'https://api.groq.com/openai/v1/chat/completions', model: 'qwen/qwen3.8-27b' },
-  gemini: { endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent',
-            model: 'gemini-3.8-flash' },
+  gemini: { endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent',
+            model: 'gemini-flash-latest' },
   _unused: {}
 };
 /* the key tells you the provider; you should not have to pick a model */
@@ -415,7 +415,10 @@ function isGemini(ep, model) {
 function detectProvider(key) {
   const k = String(key || '').trim();
   if (/^gsk_/.test(k)) return 'groq';
-  if (/^AIza[0-9A-Za-z_-]{20,}/.test(k)) return 'gemini';   // Google AI Studio key
+  // Google AI Studio issues two key shapes: the older "AIza..." and, since
+  // mid-2026, auth keys that start "AQ." - both are Gemini.
+  if (/^AIza[0-9A-Za-z_-]{20,}/.test(k)) return 'gemini';
+  if (/^AQ\.[0-9A-Za-z_.-]{20,}/.test(k)) return 'gemini';
   return null;
 }
 /* Gemini speaks a different dialect: contents/parts instead of messages, and the
