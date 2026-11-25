@@ -1648,16 +1648,23 @@ async function tick() {
    * locally and only call the model when the text is new. */
   if (useApi() && !heard.length && lastScreenKind === 'box') {
     const txt = await readScreenText();
+    // With no text reader we cannot tell a new line from the same one, so press
+    // A a couple of times and then hand control back. Blindly pressing forever
+    // would skip a whole cutscene without the model ever seeing it.
+    const limit = S.ocr === 'on' ? 60 : 2;
     if (!txt || txt === lastBoxText) {
-      boxPresses++;
-      lastApi = 'BOX (local A)';
-      await press('A');
-      if (boxPresses > 60) { boxPresses = 0; lastBoxText = ''; }
-      return;
+      if (boxPresses < limit) {
+        boxPresses++;
+        lastApi = 'BOX (local A)';
+        await press('A');
+        return;
+      }
+      boxPresses = 0;                      // out of free presses: let the model look
+    } else {
+      lastBoxText = txt;
+      boxPresses = 0;
+      if (txt && boxLog[boxLog.length - 1] !== txt) { boxLog.push(txt); if (boxLog.length > 12) boxLog.shift(); }
     }
-    lastBoxText = txt;
-    boxPresses = 0;
-    if (txt && boxLog[boxLog.length - 1] !== txt) { boxLog.push(txt); if (boxLog.length > 12) boxLog.shift(); }
   } else if (lastScreenKind !== 'box') { lastBoxText = ''; boxPresses = 0; }
   if (useApi()) {
     try {
